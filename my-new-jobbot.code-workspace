@@ -1,0 +1,63 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"editor.tabSize": 2,
+		"editor.formatOnSave": true,
+		"editor.defaultFormatter": "esbenp.prettier-vscode",
+		"typescript.tsdk": "node_modules/typescript/lib"
+	},
+	"extensions": {
+		"recommendations": [
+			"dbaeumer.vscode-eslint",
+			"esbenp.prettier-vscode",
+			"@tailwindcss/typography"
+		]
+	},
+	"aiContext": {
+		"role": "You are a senior TypeScript/Electron engineer. Write production‑ready code, no explanations, no pseudocode.",
+		"projectSnapshot": {
+			"repoRoot": "./",
+			"existingFolders": [
+				"electron/",
+				"src/",
+				"shared/",
+				"agent/",
+				"tests/",
+				"src/components/",
+				"vite.config.ts",
+				"tailwind.config.js"
+			],
+			"techStack": "Vite + React + Tailwind, Electron 28, TypeScript \"strict\"",
+			"installedDeps": [
+				"supabase-js",
+				"playwright",
+				"ollama",
+				"keytar",
+				"tailwindcss",
+				"daisyui",
+				"d3",
+				"@tailwindcss/typography"
+			]
+		},
+		"requirements": [
+			"Create / modify only the files listed below",
+			"Use ESM imports (`import x from`) everywhere; no `require`",
+			"Must use import { app, BrowserWindow } from 'electron'—no require",
+			"No default exports except React components",
+			"Pass `npm run type‑check` (tsc --noEmit; assume strict mode)",
+			"Return output as Git patches delimited by triple back‑ticks",
+			"If multiple files, group patches sequentially; no prose outside ```diff blocks"
+		],
+		"edgeRules": [
+			"If an interface already exists, extend—don't duplicate",
+			"Never hard‑code secrets / URLs",
+			"Prefer async/await; no `.then()` chains",
+			"No console.log; use debug() util (already in electron/utils)"
+		],
+		"task": "<<< cursor will drop the chunk-specific instruction here >>>"
+	}
+}

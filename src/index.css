@@ -1,0 +1,14 @@
+@import "tailwindcss"; 
+
+@plugin "daisyui" { 
+  themes: dark --default;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+  /* The following styles are removed as they conflict with a full-page layout */
+  /* margin: auto; */ 
+  /* max-width: 38rem; */ 
+  /* padding: 2rem; */
+}
