@@ -71,18 +71,21 @@ export type Database = {
           created_at: string
           id: string
           question: string
+          user_id: string | null
         }
         Insert: {
           answer: string
           created_at?: string
           id?: string
           question: string
+          user_id?: string | null
         }
         Update: {
           answer?: string
           created_at?: string
           id?: string
           question?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -93,6 +96,7 @@ export type Database = {
           embedding: string | null
           faq_id: string
           id: string
+          user_id: string | null
         }
         Insert: {
           chunk_text: string
@@ -100,6 +104,7 @@ export type Database = {
           embedding?: string | null
           faq_id: string
           id?: string
+          user_id?: string | null
         }
         Update: {
           chunk_text?: string
@@ -107,6 +112,7 @@ export type Database = {
           embedding?: string | null
           faq_id?: string
           id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -160,6 +166,7 @@ export type Database = {
           created_at: string
           full_name: string | null
           id: string
+          resume_text: string | null
           updated_at: string
           user_id: string
         }
@@ -168,6 +175,7 @@ export type Database = {
           created_at?: string
           full_name?: string | null
           id?: string
+          resume_text?: string | null
           updated_at?: string
           user_id: string
         }
@@ -176,6 +184,7 @@ export type Database = {
           created_at?: string
           full_name?: string | null
           id?: string
+          resume_text?: string | null
           updated_at?: string
           user_id?: string
         }

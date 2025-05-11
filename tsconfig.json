@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -9,11 +10,15 @@
     "sourceMap": true,
     "baseUrl": ".",
     "outDir": "dist",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true
+
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "composite": true
   },
   "include": [
     "electron/**/*.ts",
-    "forge.env.d.ts"
+    "forge.env.d.ts",
+    "agent/**/*.ts",
+    "src/**/*.ts"
   ]
 }
