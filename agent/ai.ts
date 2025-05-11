@@ -1,29 +1,50 @@
 import { UserProfile, JobListing, Answer, ResumeChunk, FAQ } from '../src/shared/types.js';
 import { exec } from 'child_process'; // For Ollama version check
 import util from 'util';
+import fs from 'fs'; // Added for reading PDF files
 import { Ollama } from 'ollama';
 import dotenv from 'dotenv';
+// Try importing getDocument directly from the main package entry, hoping TS resolves types correctly.
+// If DOMMatrix error persists, it means this isn't using the legacy/node build internally.
+// import { getDocument } from 'pdfjs-dist'; 
+// We will need the types for PDFDocumentProxy, PDFPageProxy etc. If not picked up, may need @types/pdfjs-dist or manual types.
+
+// If worker issues arise in a strict Node environment, you might need to set workerSrc:
+// import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.entry'; // CommonJS import for worker
+// getDocument({ GlobalWorkerOptions: { workerSrc: pdfjsWorker } }); // This is usually set on global or per getDocument call
+
+// import { createCanvas } from 'canvas'; // For rendering PDF pages to images
 
 import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
+import OpenAI from "openai"; // Import the raw OpenAI SDK
+import path from 'path'; // For path.basename
+import { TablesInsert } from '../src/shared/supabase.js'; // Corrected path
 
 dotenv.config();
 const execAsync = util.promisify(exec);
-const debug = (namespace: string) => (...args: any[]) => {};
+const debug = (namespace: string) => (...args: any[]) => console.log(`[${namespace}]`, ...args);
 const log = debug('jobot:ai');
 
 // --- AI Provider Configuration ---
-const AI_PROVIDER = process.env.AI_PROVIDER || 'ollama';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:latest';
+const AI_PROVIDER = process.env.AI_PROVIDER || 'openai'; // Default to openai now
+// OLLAMA_MODEL is still relevant for general Ollama text generation if AI_PROVIDER is ollama
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:latest'; 
 const OLLAMA_EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || 'nomic-embed-text';
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL_NAME = process.env.OPENAI_MODEL_NAME || 'gpt-3.5-turbo';
+// Ensure OPENAI_MODEL_NAME is set to a model that supports direct PDF input like gpt-4o or gpt-4o-mini
+const OPENAI_MODEL_NAME = process.env.OPENAI_MODEL_NAME || 'gpt-4o-mini'; 
 const OPENAI_EMBEDDING_MODEL_NAME = process.env.OPENAI_EMBEDDING_MODEL_NAME || 'text-embedding-3-small';
 
 log(`AI Provider: ${AI_PROVIDER}`);
+log(`OpenAI Model for general tasks (and PDF extraction): ${OPENAI_MODEL_NAME}`);
+if (AI_PROVIDER === 'ollama') {
+  log(`Ollama Model for general tasks: ${OLLAMA_MODEL}`);
+}
 
 let ollamaClient: Ollama | null = null;
-let openAIChatModel: ChatOpenAI | null = null;
+let openAIChatCompletionClient: OpenAI | null = null; // For direct SDK calls if needed for PDF
+let openAIChatModel: ChatOpenAI | null = null; // Langchain wrapper for general chat
 let openAIEmbeddings: OpenAIEmbeddings | null = null;
 
 if (AI_PROVIDER === 'ollama') {
@@ -33,16 +54,21 @@ if (AI_PROVIDER === 'ollama') {
   if (!OPENAI_API_KEY) {
     throw new Error('OpenAI API key is required when AI_PROVIDER is openai.');
   }
-  openAIChatModel = new ChatOpenAI({ apiKey: OPENAI_API_KEY, modelName: OPENAI_MODEL_NAME });
+  openAIChatCompletionClient = new OpenAI({ apiKey: OPENAI_API_KEY }); // For direct PDF calls
+  openAIChatModel = new ChatOpenAI({ apiKey: OPENAI_API_KEY, modelName: OPENAI_MODEL_NAME }); // For LangChain integration
   openAIEmbeddings = new OpenAIEmbeddings({ apiKey: OPENAI_API_KEY, modelName: OPENAI_EMBEDDING_MODEL_NAME });
-  log('Initialized OpenAI clients.');
+  log('Initialized OpenAI clients (raw SDK client and LangChain ChatModel/Embeddings).');
 } else {
-  throw new Error(`Invalid AI_PROVIDER: ${AI_PROVIDER}`);
+  // If AI_PROVIDER is something else, and it's not 'openai', PDF extraction won't work.
+  // For now, we let it be, but extractTextFromPdfViaMultimodal will handle it.
+  log(`Warning: AI_PROVIDER is set to '${AI_PROVIDER}'. PDF extraction will only work if it's 'openai'.`);
 }
 
 async function ensureOllamaInstalled(): Promise<void> {
+  // This function is only relevant if Ollama is a possible provider for some operations.
+  if (AI_PROVIDER !== 'ollama' || !ollamaClient) return;
   try {
-    await ollamaClient?.list();
+    await ollamaClient.list();
     log('Ollama connection OK');
   } catch (err: any) {
     log('Ollama API error:', err.message);
@@ -55,51 +81,187 @@ async function ensureOllamaInstalled(): Promise<void> {
   }
 }
 
-async function getEmbedding(text: string): Promise<number[]> {
+export async function getEmbedding(text: string): Promise<number[]> {
   if (AI_PROVIDER === 'ollama') {
     await ensureOllamaInstalled();
-    const resp = await ollamaClient!.embeddings({ model: OLLAMA_EMBEDDING_MODEL, prompt: text });
+    if (!ollamaClient) throw new Error('Ollama client not initialized for getEmbedding.');
+    const resp = await ollamaClient.embeddings({ model: OLLAMA_EMBEDDING_MODEL, prompt: text });
     return resp.embedding;
   }
-  const embedding = await openAIEmbeddings!.embedQuery(text);
+  // OpenAI provider path
+  if (!openAIEmbeddings) throw new Error('OpenAI Embeddings client not initialized.');
+  const embedding = await openAIEmbeddings.embedQuery(text);
   return embedding;
 }
 
 async function queryResumeChunks(userId: string, questionVector: number[]): Promise<Pick<ResumeChunk,'content'>[]> {
   await new Promise(r => setTimeout(r, 50));
-  return [
-    { content: "Experienced software engineer with a passion for AI. Proficient in TypeScript and Python." },
-    { content: "Developed full-stack applications using TypeScript and Node.js with LLM integration." },
-    { content: "Skilled in Python, data analysis, and ML deployment with Ollama." },
-  ];
+  return [{ content: "Placeholder: Experienced software engineer with a passion for AI." }];
 }
 
 async function queryFaqChunks(_: number[]): Promise<Pick<FAQ,'question'|'answer'>[]> {
   await new Promise(r => setTimeout(r, 50));
-  return [
-    { question: "What are your strengths?", answer: "Problem-solving, rapid learning, and adaptability." },
-    { question: "Why this role?", answer: "Aligns with my AI development goals and LLM experience." },
-    { question: "Challenging project?", answer: "Optimized a RAG pipeline to reduce hallucinations by 30%." },
-  ];
+  return [{ question: "Placeholder: What are your strengths?", answer: "Placeholder: Problem-solving and adaptability." }];
 }
 
 /**
- * Calls Ollama or OpenAI based on AI_PROVIDER.
+ * General purpose generative model call, typically used by generateAnswers, generateCoverLetter.
+ * For PDF extraction with OpenAI, extractTextFromPdfViaMultimodal uses a more direct SDK call.
  */
 async function callGenerativeModel(
-  input: string | { role: string; content: string }[]
+  input: string | { role: string; content: any }[], 
+  base64Images?: string[] 
 ): Promise<string> {
   if (AI_PROVIDER === 'ollama') {
-    if (typeof input !== 'string') throw new Error('Ollama expects a prompt string.');
     await ensureOllamaInstalled();
-    const resp = await ollamaClient!.generate({ model: OLLAMA_MODEL, prompt: input, stream: false });
+    if (!ollamaClient) throw new Error('Ollama client not initialized for callGenerativeModel.');
+    
+    let promptText = "";
+    if (typeof input === 'string') {
+      promptText = input;
+    } else if (Array.isArray(input) && input.length > 0) {
+        const userMessage = input.find(m => m.role === 'user');
+        if (userMessage && typeof userMessage.content === 'string') {
+            promptText = userMessage.content;
+        } else if (userMessage && Array.isArray(userMessage.content)) {
+            const textPart = userMessage.content.find(c => c.type === 'text');
+            if (textPart && typeof textPart.text === 'string') promptText = textPart.text;
+        } else {
+          promptText = "Describe the content of the image(s)."; // Fallback for image-only multimodal
+        }
+    } else {
+      throw new Error('Invalid input type for Ollama in callGenerativeModel.');
+    }
+    log(`[Ollama callGenerativeModel] Using prompt: "${promptText.substring(0,100)}..." with ${base64Images ? base64Images.length : 0} image(s).`);
+    const resp = await ollamaClient.generate({
+      model: OLLAMA_MODEL, 
+      prompt: promptText,
+      images: base64Images, // This will be undefined if no images, which is fine
+      stream: false,
+    });
     return resp.response.trim();
   }
-  // OpenAI branch
-  if (!Array.isArray(input)) throw new Error('OpenAI expects messages array.');
-  const resp = await openAIChatModel!.invoke(input);
+  
+  // OpenAI branch (using LangChain ChatOpenAI wrapper for general chat)
+  if (!Array.isArray(input) || input.length === 0) { 
+    throw new Error('OpenAI expects a non-empty messages array for ChatOpenAI.');
+  }
+  if (!openAIChatModel) throw new Error('OpenAI ChatModel (LangChain) not initialized.');
+  const resp = await openAIChatModel.invoke(input);
   const content = typeof resp.content === 'string' ? resp.content : JSON.stringify(resp.content);
   return content.trim();
+}
+
+export async function extractTextFromPdfViaMultimodal(filePath: string): Promise<string | null> {
+  log(`[AI PDF Extract] Starting extraction for: ${filePath} using ${AI_PROVIDER}`);
+  
+  if (AI_PROVIDER === 'openai') {
+    if (!OPENAI_API_KEY) throw new Error('OpenAI API key is required for PDF extraction.');
+    if (!openAIChatCompletionClient) throw new Error('OpenAI raw client not initialized for PDF extraction.');
+
+    try {
+      log(`[AI PDF Extract OpenAI] Reading file: ${filePath}`);
+      const fileBuffer = fs.readFileSync(filePath);
+      const base64Pdf = fileBuffer.toString('base64');
+      const fileName = path.basename(filePath);
+      log(`[AI PDF Extract OpenAI] PDF read and encoded. Filename: ${fileName}`);
+
+      const promptText = "Extract all text content from this PDF document. Preserve the structure, paragraphs, and line breaks as accurately as possible. Output only the extracted text.";
+      
+      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: promptText },
+            {
+              type: "file",
+              // @ts-ignore 
+              file: {
+                file_data: `data:application/pdf;base64,${base64Pdf}`,
+                filename: fileName
+              }
+            }
+          ]
+        }
+      ];
+
+      log(`[AI PDF Extract OpenAI] Sending request to model: ${OPENAI_MODEL_NAME}`);
+      const response = await openAIChatCompletionClient.chat.completions.create({
+        model: OPENAI_MODEL_NAME, 
+        messages: messages,
+        max_tokens: 4000, 
+      });
+
+      const extractedText = response.choices[0]?.message?.content;
+      if (extractedText) {
+        log(`[AI PDF Extract OpenAI] Successfully extracted text. Length: ${extractedText.length}`);
+        return extractedText.trim();
+      } else {
+        log('[AI PDF Extract OpenAI] No text content found in response choice.');
+        return null;
+      }
+    } catch (error: any) {
+      log(`[AI PDF Extract OpenAI] Error: ${error.message}`);
+      console.error('[AI PDF Extract OpenAI] Detailed Error:', error);
+      return null;
+    }
+  } else {
+    // If not OpenAI, PDF extraction is not supported by this function anymore.
+    log(`[AI PDF Extract] PDF extraction is only supported with AI_PROVIDER='openai'. Current provider: '${AI_PROVIDER}'. Skipping PDF processing.`);
+    return null;
+  }
+}
+
+export async function extractCompanyNamesFromText(resumeText: string): Promise<string[]> {
+  log('[AI Company Extract] Attempting to extract company names from text.');
+  if (AI_PROVIDER !== 'openai') {
+    log('[AI Company Extract] Company extraction is currently only supported with AI_PROVIDER=\'openai\'. Skipping.');
+    return [];
+  }
+  if (!resumeText || resumeText.trim().length === 0) {
+    log('[AI Company Extract] No resume text provided. Skipping.');
+    return [];
+  }
+
+  const systemPrompt = "You are an expert resume parser. Your task is to extract company names from the user's work experience sections.";
+  const userPrompt = `From the following resume text, please extract a list of all distinct company names where the person has previously worked.
+Focus on extracting only the company names.
+Return the company names as a flat JSON array of strings. For example: ["Acme Corp", "Beta Industries", "Gamma Solutions LLC"]
+If no company names are found, return an empty JSON array: [].
+
+Resume text:
+---
+${resumeText}
+---
+
+JSON array of company names:`;
+
+  try {
+    log('[AI Company Extract] Calling generative model for company name extraction.');
+    const modelInput = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ];
+    const rawResponse = await callGenerativeModel(modelInput);
+    log(`[AI Company Extract] Raw response from model: ${rawResponse}`);
+
+    // Attempt to parse the JSON array from the model's response
+    // The model might sometimes add extra text around the JSON.
+    const jsonMatch = rawResponse.match(/(\[.*\])/s);
+    if (jsonMatch && jsonMatch[0]) {
+      const companyNames = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(companyNames) && companyNames.every(item => typeof item === 'string')) {
+        log(`[AI Company Extract] Successfully extracted company names: ${companyNames.join(', ')}`);
+        return companyNames;
+      }
+    }
+    log('[AI Company Extract] Could not parse a valid JSON array of strings from the model response.');
+    return [];
+  } catch (error: any) {
+    log(`[AI Company Extract] Error during company name extraction: ${error.message}`);
+    console.error('[AI Company Extract] Detailed Error:', error);
+    return [];
+  }
 }
 
 export async function generateAnswers(
@@ -109,36 +271,41 @@ export async function generateAnswers(
 ): Promise<Answer[]> {
   const answers: Answer[] = [];
   for (const question of questions) {
+    log(`[generateAnswers] Getting embedding for question: "${question.substring(0,50)}..."`);
     const vec = await getEmbedding(question);
+    log(`[generateAnswers] Querying resume and FAQ chunks.`);
     const [resChunks, faqChunks] = await Promise.all(
       [queryResumeChunks(user.id, vec), queryFaqChunks(vec)]
     );
     const resumeText = resChunks.map(r => r.content).join('\n');
     const faqText = faqChunks.map(f => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
 
-    const systemMsg = {
-      role: 'system', content:
-        `Strict: start with ANSWER:. Max 400 chars. Cite [Resume] or [FAQ].`
-    };
-    const userMsg = {
-      role: 'user', content:
-        `Context:\n[Resume]\n${resumeText}\n\n[FAQ]\n${faqText}\n\nJob: ${job.title} at ${job.company}\nDescription: ${job.description}\n\nQuestion: ${question}`
-    };
+    const systemPrompt = `Strict: start with ANSWER:. Max 400 chars. Cite [Resume] or [FAQ].`;
+    const userPrompt = `Context:\n[Resume]\n${resumeText}\n\n[FAQ]\n${faqText}\n\nJob: ${job.title} at ${job.company}\nDescription: ${job.description}\n\nQuestion: ${question}`;
+    
+    let modelInput: string | { role: string; content: any }[];
 
-    const input = AI_PROVIDER === 'openai' ? [systemMsg, userMsg] :
-      `Context:\n[Resume]\n${resumeText}\n[FAQ]\n${faqText}\nInstruction: ANSWER, first-person, max 400 chars, cite sources.\nQuestion: ${question}\nANSWER:`;
-
-    let raw = await callGenerativeModel(input);
+    if (AI_PROVIDER === 'openai') {
+      modelInput = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ];
+    } else { // Ollama
+      modelInput = `Context:\n[Resume]\n${resumeText}\n[FAQ]\n${faqText}\nInstruction: ANSWER, first-person, max 400 chars, cite sources.\nQuestion: ${question}\nANSWER:`;
+    }
+    log(`[generateAnswers] Calling generative model. Input length (if string): ${typeof modelInput === 'string' ? modelInput.length : 'N/A'}`);
+    let raw = await callGenerativeModel(modelInput);
     const match = raw.match(/ANSWER:\s*([\s\S]*)/i);
-    let answer = match ? match[1].trim() : raw.trim();
-    if (answer.length > 400) answer = answer.slice(0,397) + '...';
+    let answerText = match ? match[1].trim() : raw.trim();
+    if (answerText.length > 400) answerText = answerText.slice(0,397) + '...';
 
     const refs: string[] = [];
-    if (answer.includes('[Resume]')) refs.push('Resume');
-    if (answer.includes('[FAQ]')) refs.push('FAQ');
+    if (answerText.includes('[Resume]')) refs.push('Resume');
+    if (answerText.includes('[FAQ]')) refs.push('FAQ');
     if (!refs.length) refs.push(resumeText ? 'Resume' : 'FAQ');
 
-    answers.push({ question, answer, refs });
+    answers.push({ question, answer: answerText, refs });
+    log(`[generateAnswers] Answer generated for question "${question.substring(0,50)}...". Length: ${answerText.length}`);
   }
   return answers;
 }
@@ -147,25 +314,27 @@ export async function generateCoverLetter(
   user: UserProfile,
   job: JobListing
 ): Promise<string> {
-  const vec = Array(100).fill(0);
+  log(`[generateCoverLetter] Getting placeholder embeddings.`);
+  const vec = Array(100).fill(0); // Placeholder for actual embedding vector if needed for context retrieval
+  log(`[generateCoverLetter] Querying resume and FAQ chunks.`);
   const [resChunks, faqChunks] = await Promise.all(
     [queryResumeChunks(user.id, vec), queryFaqChunks(vec)]
   );
   const resumeText = resChunks.map(r => r.content).join('\n - ');
   const faqText = faqChunks.map(f => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
 
-  const systemMsg = {
-    role: 'system', content:
-      `Wrap between COVER_LETTER_BEGINS_HERE and COVER_LETTER_ENDS_HERE. Max 2000 chars.`
-  };
-  const userMsg = {
-    role: 'user', content:
-      `Profile: ${user.name}, ${user.email}\nHighlights:\n - ${resumeText}\nCompany FAQ:\n${faqText}\nJob: ${job.title} at ${job.company}\nDescription: ${job.description}`
-  };
+  const systemPrompt = `Wrap between COVER_LETTER_BEGINS_HERE and COVER_LETTER_ENDS_HERE. Max 2000 chars.`;
+  const userPrompt = `Profile: ${user.name}, ${user.email}\nHighlights:\n - ${resumeText}\nCompany FAQ:\n${faqText}\nJob: ${job.title} at ${job.company}\nDescription: ${job.description}`;
 
-  const input = AI_PROVIDER === 'openai'
-    ? [systemMsg, userMsg]
-    : `You are writing a cover letter as an external applicant for the following job.
+  let modelInput: string | { role: string; content: any }[];
+
+  if (AI_PROVIDER === 'openai') {
+    modelInput = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ];
+  } else { // Ollama
+    modelInput = `You are writing a cover letter as an external applicant for the following job.
 Applicant Profile: ${user.name}, ${user.email}
 Resume Highlights:
  - ${resumeText}
@@ -176,14 +345,17 @@ Title: ${job.title}
 Company: ${job.company}
 Description: ${job.description}
 Instruction: Write a 3-paragraph cover letter for this job application. Wrap between COVER_LETTER_BEGINS_HERE and COVER_LETTER_ENDS_HERE. Max 2000 chars. Do NOT assume the applicant already works at the company.`;
+  }
 
-  let raw = await callGenerativeModel(input);
+  log(`[generateCoverLetter] Calling generative model.`);
+  let raw = await callGenerativeModel(modelInput);
   let letter = raw;
-  const start = letter.indexOf('COVER_LETTER_BEGINS_HERE');
-  const end = letter.indexOf('COVER_LETTER_ENDS_HERE');
-  if (start >= 0 && end > start) {
-    letter = letter.slice(start+24, end).trim();
+  const startIdx = letter.indexOf('COVER_LETTER_BEGINS_HERE');
+  const endIdx = letter.indexOf('COVER_LETTER_ENDS_HERE');
+  if (startIdx >= 0 && endIdx > startIdx) {
+    letter = letter.slice(startIdx + 'COVER_LETTER_BEGINS_HERE'.length, endIdx).trim();
   }
   if (letter.length > 2000) letter = letter.slice(0,1997) + '...';
+  log(`[generateCoverLetter] Cover letter generated. Length: ${letter.length}`);
   return letter;
 }

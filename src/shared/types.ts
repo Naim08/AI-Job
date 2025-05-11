@@ -2,6 +2,17 @@ export interface UserProfile {
   readonly id: string;
   name: string;
   email: string;
+  avatar_url?: string | null;
+  settings?: UserProfileSettings | null;
+  created_at?: string;
+  updated_at?: string;
+  resume_path?: string;
+}
+
+export interface UserProfileSettings {
+  jobSearchSettings?: Array<string> | null;
+  jobSearchLocation?: Array<string> | null;
+  // ... existing code ...
 }
 
 export interface ResumeChunk {

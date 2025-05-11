@@ -1,16 +1,20 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { UserProfile } from "../src/shared/types.js";
+import { TablesInsert } from '../src/shared/supabase.js';
 import debug from 'debug';
-import execa from 'execa';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { supabase } from '../src/lib/supabaseClient.js';
+import { extractTextFromPdfViaMultimodal, getEmbedding as getEmbeddingFromAI, extractCompanyNamesFromText } from '../agent/ai.js';
 
 const log = debug('jobot:embeddings');
 
 interface DbProfile {
     user_id: string;
     id: string;
-    resume_text: string | null;
+    resume_path: string | null;
+    email: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -40,8 +44,6 @@ interface FaqChunkInsert {
 
 const CHUNK_SIZE = 1000;
 const CHUNK_OVERLAP = 200;
-const OLLAMA_MODEL = "nomic-embed-text";
-const EXPECTED_EMBEDDING_LENGTH = 768;
 
 function splitIntoSentences(text: string): string[] {
     if (!text) return [];
@@ -89,53 +91,6 @@ function chunkText(text: string, chunkSize: number, overlapSize: number): string
     return chunks.filter(c => c.trim().length > 0);
 }
 
-async function getEmbedding(chunk: string): Promise<number[]> {
-    log(`Generating embedding for chunk (length: ${chunk.length}), starting with: "${chunk.substring(0, 80)}..." via Ollama API`);
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-        const response = await fetch('http://localhost:11434/api/embeddings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: OLLAMA_MODEL,
-                prompt: chunk,
-            }),
-            signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            log(`Error from Ollama API: ${response.status} ${response.statusText}. Body: ${errorBody}`);
-            throw new Error(`Ollama API request failed with status ${response.status}: ${errorBody}`);
-        }
-
-        const output = await response.json();
-
-        if (output && Array.isArray(output.embedding)) {
-            if (output.embedding.length !== EXPECTED_EMBEDDING_LENGTH) {
-                log(`WARNING: Embedding dimension mismatch for model ${OLLAMA_MODEL}. Expected ${EXPECTED_EMBEDDING_LENGTH}, Got ${output.embedding.length}. Chunk: "${chunk.substring(0,50)}..."`);
-            }
-            log(`Successfully generated embedding via API, dimensions: ${output.embedding.length}`);
-            return output.embedding;
-        }
-        log('Error: Invalid embedding format from Ollama API. Response:', JSON.stringify(output));
-        throw new Error('Invalid embedding format from Ollama API');
-    } catch (error: any) {
-        if (error.name === 'AbortError') {
-            log('Error generating embedding from Ollama API: Request timed out.');
-            throw new Error('Ollama API request timed out');
-        }
-        log('Error generating embedding from Ollama API:', error.message);
-        throw error;
-    }
-}
-
 function generateDeterministicId(text: string): string {
     const hash = crypto.createHash('sha256').update(text).digest('hex');
     // Take the first 32 characters (128 bits) of the SHA256 hash and format as a UUID
@@ -144,14 +99,14 @@ function generateDeterministicId(text: string): string {
 }
 
 export async function syncEmbeddings(user: UserProfile): Promise<void> {
-    log(`Starting embedding sync for user: ${user.id}`);
+    log(`Starting embedding sync for user: ${user.id} using AI-powered services.`);
     let totalChunksProcessed = 0;
     let totalChunksUpserted = 0;
 
-    log(`Fetching resume_text for user ${user.id} from profiles table using user_id column...`);
+    log(`Fetching profile details for user ${user.id} (including resume_path)...`);
     const { data: profileData, error: profileError } = await supabase
         .from('profiles')
-        .select('id, user_id, resume_text, created_at, updated_at')
+        .select('id, user_id, resume_path, email, created_at, updated_at')
         .eq('user_id', user.id)
         .single<DbProfile>();
 
@@ -161,24 +116,88 @@ export async function syncEmbeddings(user: UserProfile): Promise<void> {
     }
     if (!profileData) {
         log(`No profile data found for user ${user.id}.`);
+        return;
     }
-    const resumeText = profileData?.resume_text;
-    if (resumeText && resumeText.trim().length > 0) {
-        log(`Processing resume for user ${user.id}. Text length: ${resumeText.length}`);
-        const textChunks = chunkText(resumeText, CHUNK_SIZE, CHUNK_OVERLAP);
+
+    const resumePath = profileData.resume_path || user.resume_path;
+    let resumeTextToProcess: string | null = null;
+    log(`[EmbeddingsV4] User object received in syncEmbeddings: ${JSON.stringify(user)}`);
+    log(`[EmbeddingsV4] profileData from DB: ${JSON.stringify(profileData)}`);
+    log(`[EmbeddingsV4] Effective resumePath to be used: ${resumePath}`);
+
+    if (resumePath && resumePath.trim().length > 0) {
+        log(`[EmbeddingsV4] Resume path is valid and non-empty: "${resumePath}"`);
+
+        if (!path.isAbsolute(resumePath)) {
+            log(`[EmbeddingsV4] WARNING: Resume path "${resumePath}" for user ${user.id} is not an absolute path. Skipping resume processing.`);
+        } else {
+            log(`[EmbeddingsV4] Resume path "${resumePath}" is absolute. Proceeding to file check.`);
+            try {
+                const fileExists = fs.existsSync(resumePath);
+                log(`[EmbeddingsV4] fs.existsSync("${resumePath}") returned: ${fileExists}`);
+                if (fileExists) {
+                    log(`[EmbeddingsV4] Attempting to extract text from PDF via AI: ${resumePath}`);
+                    resumeTextToProcess = await extractTextFromPdfViaMultimodal(resumePath);
+
+                    if (resumeTextToProcess && resumeTextToProcess.length > 0) {
+                        log(`[EmbeddingsV4] Successfully extracted ${resumeTextToProcess.length} characters of text from PDF via AI.`);
+                    } else {
+                        log(`[EmbeddingsV4] AI PDF text extraction failed or returned no text for ${resumePath}.`);
+                        resumeTextToProcess = null; // Ensure it's null if extraction fails or returns empty
+                    }
+                } else {
+                    log(`[EmbeddingsV4] Resume PDF not found at path: ${resumePath} for user ${user.id}.`);
+                }
+            } catch (e: any) {
+                log(`[EmbeddingsV4] Error during AI PDF text extraction for user ${user.id} from ${resumePath}: ${e.message}`);
+                if (e.stack) log(`[EmbeddingsV4] Stack trace: ${e.stack}`);
+                resumeTextToProcess = null; // Ensure it's null on error
+            }
+        }
+    } else {
+        log(`[EmbeddingsV4] No resume_path found in profile or provided user object for user ${user.id}.`);
+    }
+    
+    if (resumeTextToProcess && resumeTextToProcess.trim().length > 0) {
+        log(`[EmbeddingsV4] New resume text successfully processed for user ${user.id}. Preparing to delete old resume chunks.`);
+
+        // --- New: Delete existing resume chunks for this user --- 
+        try {
+            const { error: deleteError } = await supabase
+                .from('resume_chunks')
+                .delete()
+                .eq('user_id', user.id);
+
+            if (deleteError) {
+                log(`[EmbeddingsV4] Error deleting old resume chunks for user ${user.id}: ${deleteError.message}. Proceeding with new chunk generation, but old chunks may persist.`);
+                // Potentially re-throw or handle more critically if needed
+            } else {
+                log(`[EmbeddingsV4] Successfully deleted old resume chunks for user ${user.id}.`);
+            }
+        } catch (e: any) {
+            log(`[EmbeddingsV4] Exception during deletion of old resume chunks for user ${user.id}: ${e.message}. Proceeding with new chunk generation.`);
+        }
+        // --- End of deletion block ---
+
+        log(`Processing resume for user ${user.id}. Text length: ${resumeTextToProcess.length}`);
+        const textChunks = chunkText(resumeTextToProcess, CHUNK_SIZE, CHUNK_OVERLAP);
         log(`Resume split into ${textChunks.length} chunks.`);
         totalChunksProcessed += textChunks.length;
         const resumeChunksToUpsert: ResumeChunkInsert[] = [];
         for (const chunk of textChunks) {
             if (chunk.trim().length === 0) continue;
             try {
-                const embedding = await getEmbedding(chunk);
-                const id = generateDeterministicId(chunk);
+                log(`[EmbeddingsV4] Generating embedding for resume chunk via AI service. Chunk: "${chunk.substring(0,50)}..."`);
+                const embedding = await getEmbeddingFromAI(chunk);
+                const userSpecificChunkId = generateDeterministicId(user.id + '::' + chunk);
                 resumeChunksToUpsert.push({
-                    id, user_id: user.id, resume_text_content: chunk, embedding,
+                    id: userSpecificChunkId,
+                    user_id: user.id,
+                    resume_text_content: chunk,
+                    embedding,
                 });
             } catch (e: any) {
-                log(`Failed to generate embedding for a resume chunk. User: ${user.id}. Error: ${e.message}. Chunk start: "${chunk.substring(0, 50)}..."`);
+                log(`[EmbeddingsV4] Failed to generate embedding for a resume chunk (via AI service). User: ${user.id}. Error: ${e.message}. Chunk start: "${chunk.substring(0, 50)}..."`);
             }
         }
         if (resumeChunksToUpsert.length > 0) {
@@ -192,8 +211,39 @@ export async function syncEmbeddings(user: UserProfile): Promise<void> {
                 log(`Successfully upserted ${resumeChunksToUpsert.length} resume chunks for user ${user.id}.`);
             }
         }
+
+        // New: Extract and blacklist company names from resume text
+        log(`[EmbeddingsV4] Attempting to extract company names from resume text for user ${user.id}.`);
+        try {
+          const companyNames = await extractCompanyNamesFromText(resumeTextToProcess);
+          if (companyNames.length > 0) {
+            log(`[EmbeddingsV4] Extracted ${companyNames.length} company names: ${companyNames.join(', ')}`);
+            const blacklistEntries: TablesInsert<"blacklist_companies">[] = companyNames.map(name => ({
+              user_id: user.id,
+              company_name: name,
+              reason: 'Automatically blacklisted from uploaded résumé',
+            }));
+  
+            log(`[EmbeddingsV4] Upserting ${blacklistEntries.length} company names to blacklist for user ${user.id}.`);
+            const { error: blacklistError } = await supabase
+              .from('blacklist_companies')
+              .upsert(blacklistEntries, { onConflict: 'user_id,company_name' }); // Leverages unique constraint
+  
+            if (blacklistError) {
+              log(`[EmbeddingsV4] Error upserting company names to blacklist for user ${user.id}: ${blacklistError.message}`);
+            } else {
+              log(`[EmbeddingsV4] Successfully upserted/updated company names in blacklist for user ${user.id}.`);
+            }
+          } else {
+            log(`[EmbeddingsV4] No company names extracted from resume text for user ${user.id}.`);
+          }
+        } catch (e: any) {
+          log(`[EmbeddingsV4] Error during company name extraction or blacklisting for user ${user.id}: ${e.message}`);
+        }
+        // End of new block for company blacklisting
+
     } else {
-        log(`No resume text to process for user ${user.id}.`);
+        log(`No resume text to process for user ${user.id} (either no path, file not found, or PDF parsing failed/empty). Old chunks (if any) will not be deleted.`);
     }
 
     log(`Fetching FAQs for user ${user.id} from faq table...`);
@@ -222,13 +272,14 @@ export async function syncEmbeddings(user: UserProfile): Promise<void> {
             for (const chunk of textChunks) {
                 if (chunk.trim().length === 0) continue;
                 try {
-                    const embedding = await getEmbedding(chunk);
+                    log(`[EmbeddingsV4] Generating embedding for FAQ chunk via AI service. Chunk: "${chunk.substring(0,50)}..."`);
+                    const embedding = await getEmbeddingFromAI(chunk);
                     const id = generateDeterministicId(chunk);
                     faqChunksToUpsert.push({
                         id, user_id: user.id, faq_id: faqItem.id, chunk_text: chunk, embedding,
                     });
                 } catch (e: any) {
-                    log(`Failed to generate embedding for an FAQ chunk. User: ${user.id}, FAQ ID: ${faqItem.id}. Error: ${e.message}. Chunk start: "${chunk.substring(0, 50)}..."`);
+                    log(`[EmbeddingsV4] Failed to generate embedding for an FAQ chunk (via AI service). User: ${user.id}, FAQ ID: ${faqItem.id}. Error: ${e.message}. Chunk start: "${chunk.substring(0, 50)}..."`);
                 }
             }
         }
@@ -262,7 +313,6 @@ async function runCli() {
         if (userArgValue.startsWith('--user=')) {
             userId = userArgValue.split('=')[1];
         } else if (userArgValue === '--user' && args.length > userArgIndex + 1) {
-            // Ensure the next argument is not another option flag
             if (!args[userArgIndex + 1].startsWith('--')) {
                  userId = args[userArgIndex + 1];
             }
@@ -280,8 +330,8 @@ async function runCli() {
     log(`CLI mode: User ID specified: ${userId}`);
     const user: UserProfile = {
         id: userId,
-        name: 'Test User',
-        email: 'test@example.com'
+        name: 'Test User CLI',
+        email: 'testcli@example.com',
     };
     try {
         log('CLI mode: Starting syncEmbeddings...');
@@ -301,7 +351,16 @@ async function runCli() {
 const scriptUrl = import.meta.url;
 const mainScriptPath = process.argv[1];
 
-if (scriptUrl.startsWith('file:') && mainScriptPath === new URL(scriptUrl).pathname) {
-    log('Agent embeddings script running in CLI mode.');
-    runCli();
+log(`[Embeddings CLI Check] scriptUrl: ${scriptUrl}, mainScriptPath: ${mainScriptPath}`);
+try {
+    const scriptPathname = new URL(scriptUrl).pathname;
+    log(`[Embeddings CLI Check] scriptPathname: ${scriptPathname}, mainScriptPath: ${mainScriptPath}`);
+    if (scriptUrl.startsWith('file:') && mainScriptPath === scriptPathname) {
+        log('CRITICAL: Agent embeddings script IS RUNNING IN CLI MODE during app load!');
+        runCli();
+    } else {
+        log(`[Embeddings CLI Check] Condition not met: (mainScriptPath === scriptPathname) is ${mainScriptPath === scriptPathname}. Not running CLI.`);
+    }
+} catch (e: any) {
+    log(`[Embeddings CLI Check] Error during CLI check: ${e.message}`);
 } 
