@@ -1,19 +1,41 @@
 import { UserProfile, JobListing, FilterScore, DecisionNode, BlacklistItem, ResumeChunk } from '../src/shared/types.js';
 import debug from 'debug';
+import { supabase } from '../src/lib/supabaseClient.js';
 
-const log = debug('filter');
+const log = debug('jobbot:filter');
 const SIMILARITY_THRESHOLD = 0.65;
 
 // Placeholder for a function to fetch blacklist items
 // In a real scenario, this would fetch from a database or a service
 async function fetchBlacklistItems(userId: string): Promise<BlacklistItem[]> {
-  log(`Fetching blacklist items for user ${userId}`);
-  // Mock implementation: replace with actual data fetching logic
-  // Example: return await db.select('blacklist_items').where({ userId, type: 'company' });
-  if (userId === 'user_with_blacklisted_company') {
-    return [{ id: '1', type: 'company', value: 'Evil Corp' }];
+  log(`Fetching blacklist items for user ${userId} from Supabase table 'blacklist_companies'.`);
+  
+  try {
+    const { data: blacklistData, error: blacklistError } = await supabase
+      .from('blacklist_companies')
+      .select('company_name') // Select only the company_name
+      .eq('user_id', userId);
+
+    if (blacklistError) {
+      log(`Error fetching from blacklist_companies: ${blacklistError.message}`);
+      return [];
+    }
+
+    if (blacklistData && blacklistData.length > 0) {
+      log(`Found ${blacklistData.length} blacklisted companies in table: ${blacklistData.map(item => item.company_name).join(', ')}`);
+      return blacklistData.map((item, index) => ({
+        id: `bl-table-${index + 1}`, // Generate a simple ID
+        type: 'company',
+        value: item.company_name, // company_name from the table
+      }));
+    } else {
+      log('No blacklisted companies found in blacklist_companies table for this user.');
+      return [];
+    }
+  } catch (error: any) {
+    log(`Exception fetching blacklist items from table: ${error.message}`);
+    return [];
   }
-  return [];
 }
 
 // Placeholder for a function to get embeddings via ollama

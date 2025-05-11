@@ -130,8 +130,12 @@ export type Database = {
           company_name: string
           created_at: string
           id: string
+          job_description: string | null
+          job_id: string
           job_title: string
+          job_url: string | null
           notes: string | null
+          reason: string | null
           status: string | null
           updated_at: string
           user_id: string
@@ -141,8 +145,12 @@ export type Database = {
           company_name: string
           created_at?: string
           id?: string
+          job_description?: string | null
+          job_id: string
           job_title: string
+          job_url?: string | null
           notes?: string | null
+          reason?: string | null
           status?: string | null
           updated_at?: string
           user_id: string
@@ -152,8 +160,12 @@ export type Database = {
           company_name?: string
           created_at?: string
           id?: string
+          job_description?: string | null
+          job_id?: string
           job_title?: string
+          job_url?: string | null
           notes?: string | null
+          reason?: string | null
           status?: string | null
           updated_at?: string
           user_id?: string

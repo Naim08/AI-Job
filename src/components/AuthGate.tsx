@@ -14,7 +14,9 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    debug('auth', 'AuthGate mounted, checking initial session.');
+    debug('auth', 'AuthGate mounted, setting up auth listener and checking initial session.');
+    setIsLoading(true);
+
     supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
       debug('auth', 'Initial getSession complete. Session:', currentSession ? 'Exists' : 'None', currentSession?.user?.email);
       setSession(currentSession);
@@ -22,37 +24,35 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       setIsLoading(false);
     });
 
-    const { data: authListenerData } = supabase.auth.onAuthStateChange(
-      (_event, newAuthStateSession) => {
-        debug('auth', 'Auth state changed. Event:', _event, 'New auth state session:', newAuthStateSession ? 'Exists' : 'None', newAuthStateSession?.user?.email);
-        
-        const previousComponentSession = session;
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (event, newSessionState) => {
+        debug('auth', 'Auth state changed. Event:', event, 'New session state:', newSessionState ? 'Exists' : 'None', newSessionState?.user?.email);
 
-        setSession(newAuthStateSession);
-        setUser(newAuthStateSession?.user ?? null);
-        setIsLoading(false); 
-
-        if (_event === 'SIGNED_IN') {
-          if (previousComponentSession === null && newAuthStateSession !== null) {
-            debug('auth', 'User actively signed in OR session established for the first time in this component lifecycle.');
-            showToast('Signed in successfully!', 'success');
-          } else {
-            debug('auth', 'User session refreshed/validated by listener, no new sign-in toast needed as component already had a session or new session is null.');
-          }
-        }
-        
-        if (_event === 'SIGNED_OUT') {
+        setSession(prevSession => {
+          if (event === 'SIGNED_IN') {
+            if (prevSession === null && newSessionState !== null) {
+              debug('auth', 'User actively signed in OR session established for the first time for this AuthGate instance.');
+              showToast('Signed in successfully!', 'success');
+            } else if (prevSession && newSessionState) {
+              debug('auth', 'User session refreshed/validated by listener, no new sign-in toast needed.');
+            } else {
+              debug('auth', 'SIGNED_IN event, but no clear "new login" transition for toast logic.');
+            }
+          } else if (event === 'SIGNED_OUT') {
             debug('auth', 'User signed out.');
             showToast('Signed out successfully.', 'success');
-        }
+          }
+          return newSessionState;
+        });
+        setUser(newSessionState?.user ?? null);
       }
     );
 
     return () => {
       debug('auth', 'AuthGate unmounted, unsubscribing from auth state changes.');
-      authListenerData?.subscription?.unsubscribe(); 
+      authListener?.subscription?.unsubscribe();
     };
-  }, [session]);
+  }, []);
 
   const handleGoogleLogin = async () => {
     setAuthError(null);

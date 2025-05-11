@@ -2,19 +2,56 @@
 
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 import { Database } from '../shared/supabase.js';
+import dotenv from 'dotenv';
 
-// Use import.meta.env for Vite environment variables
-const supabaseUrl: string | undefined = import.meta.env.VITE_SUPABASE_URL;
-// IMPORTANT: Use your ANONYMOUS PUBLIC KEY here for client-side code.
-// Ensure VITE_SUPABASE_ANON_KEY is set in your .env file.
-const supabaseAnonKey: string | undefined = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Load .env file only when not in a Vite environment (e.g., running with Node)
+if (typeof import.meta.env === 'undefined') {
+  dotenv.config();
+}
+// console.log(process.env); // Removed debugging line
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Supabase URL and Anonymous Key must be provided in environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).");
+// Use import.meta.env for Vite, process.env for Node
+const supabaseUrl: string | undefined = typeof import.meta.env !== 'undefined'
+                                      ? import.meta.env.VITE_SUPABASE_URL
+                                      : process.env.VITE_SUPABASE_URL;
+const supabaseAnonKey: string | undefined = typeof import.meta.env !== 'undefined'
+                                          ? import.meta.env.VITE_SUPABASE_ANON_KEY
+                                          : process.env.VITE_SUPABASE_ANON_KEY;
+
+let finalSupabaseKey: string | undefined;
+const isNodeEnvironment = typeof import.meta.env === 'undefined';
+
+if (isNodeEnvironment) {
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+  if (serviceKey) {
+    finalSupabaseKey = serviceKey;
+    console.log('[SupabaseClient] Initializing with SERVICE ROLE KEY for Node.js environment.');
+  } else {
+    finalSupabaseKey = supabaseAnonKey;
+    console.warn('[SupabaseClient] WARNING: Initializing with ANON KEY for Node.js environment. RLS will apply. Consider setting SUPABASE_SERVICE_KEY in .env for backend scripts if elevated privileges are needed.');
+  }
+} else {
+  finalSupabaseKey = supabaseAnonKey;
+}
+
+if (!supabaseUrl) {
+  throw new Error(
+    `Supabase URL (VITE_SUPABASE_URL in .env or environment variables) must be provided.`
+  );
+}
+
+if (!finalSupabaseKey) {
+  let keyMissingMessage = "Supabase Key must be provided. ";
+  if (isNodeEnvironment) {
+    keyMissingMessage += "(Set VITE_SUPABASE_ANON_KEY or SUPABASE_SERVICE_KEY in .env for Node.js)";
+  } else { // Vite
+    keyMissingMessage += "(VITE_SUPABASE_ANON_KEY in .env or environment variables for Vite)";
+  }
+  throw new Error(keyMissingMessage);
 }
 
 // Initialize with the Database generic for schema-specific types
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient<Database>(supabaseUrl, finalSupabaseKey);
 
 // The SupabaseClient type can also be more specific if needed, though often inferred
 // export const supabase: SupabaseClient<Database> = createClient<Database>(supabaseUrl, supabaseAnonKey);
