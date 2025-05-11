@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "description": "My Electron application description",
-  "main": ".vite/build/main.js",
+  "main": ".vite/build/main.cjs",
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",

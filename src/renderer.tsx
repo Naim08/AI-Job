@@ -4,6 +4,7 @@ import AppLayout, { PageName } from './components/AppLayout';
 import HistoryPage from './pages/HistoryPage';
 import ActivityPage from './pages/ActivityPage';
 import SettingsPage from './pages/SettingsPage';
+import { AuthGate } from './components/AuthGate';
 import './index.css'; // Ensure Tailwind/DaisyUI styles are imported
 
 function App() {
@@ -23,9 +24,18 @@ function App() {
   };
 
   return (
-    <AppLayout activePage={activePage} onPageChange={setActivePage}>
-      {renderPage()}
-    </AppLayout>
+    <AuthGate>
+      {(user, logout) => (
+        <AppLayout 
+          user={user} 
+          onLogout={logout} 
+          activePage={activePage} 
+          onPageChange={setActivePage}
+        >
+          {renderPage()}
+        </AppLayout>
+      )}
+    </AuthGate>
   );
 }
 

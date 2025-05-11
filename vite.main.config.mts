@@ -9,7 +9,7 @@ export default defineConfig({
     lib: {
       entry: 'src/main.ts', // Or your actual main process entry
       formats: ['cjs'],
-      fileName: () => 'main.js'
+      fileName: () => 'main.cjs'
     },
     rollupOptions: {
       external: [

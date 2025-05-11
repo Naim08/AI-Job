@@ -1,12 +1,15 @@
 import React from 'react';
-import { BarChart2, History, Settings as SettingsIcon } from 'lucide-react';
+import { BarChart2, History, Settings as SettingsIcon, LogOut } from 'lucide-react';
+import { User } from '@supabase/supabase-js';
 
 export type PageName = 'history' | 'activity' | 'settings';
 
-interface AppLayoutProps {
+export interface AppLayoutProps {
   activePage: PageName;
   onPageChange: (page: PageName) => void;
   children: React.ReactNode;
+  user: User | null;
+  onLogout: () => Promise<void>;
 }
 
 const pageTitles: Record<PageName, string> = {
@@ -15,7 +18,7 @@ const pageTitles: Record<PageName, string> = {
   settings: 'Settings',
 };
 
-const AppLayout: React.FC<AppLayoutProps> = ({ activePage, onPageChange, children }) => {
+const AppLayout: React.FC<AppLayoutProps> = ({ activePage, onPageChange, children, user, onLogout }) => {
   const menuItems = (
     <>
       <li>
@@ -36,6 +39,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ activePage, onPageChange, childre
     </>
   );
 
+  const handleLogoutClick = async () => {
+    await onLogout();
+    // AuthGate will handle redirecting to login screen via onAuthStateChange
+  };
+
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-base-200">
       {/* Top Navbar for small screens */}
@@ -47,21 +55,45 @@ const AppLayout: React.FC<AppLayoutProps> = ({ activePage, onPageChange, childre
             </label>
             <ul tabIndex={0} className="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow bg-base-100 rounded-box w-52">
               {menuItems}
+              <li><hr className="my-2"/></li>
+              <li>
+                <button onClick={handleLogoutClick} className="btn btn-ghost w-full justify-start">
+                  <LogOut size={18} /> Logout
+                </button>
+              </li>
             </ul>
           </div>
         </div>
         <div className="navbar-center">
           <a className="btn btn-ghost normal-case text-xl">{pageTitles[activePage]}</a>
         </div>
-        <div className="navbar-end"></div>
+        <div className="navbar-end">
+          {user && <span className="text-sm mr-2 hidden sm:inline">{user.email}</span>}
+        </div>
       </div>
 
       {/* Sidebar for medium and larger screens */}
-      <aside className="hidden md:block w-64 bg-base-100 shadow-lg p-4">
-        <div className="text-2xl font-bold mb-6 sticky top-4 px-4">My App</div>
-        <ul className="menu">
-          {menuItems}
-        </ul>
+      <aside className="hidden md:block w-64 bg-base-100 shadow-lg p-4 flex flex-col justify-between">
+        <div>
+          <div className="text-2xl font-bold mb-6 sticky top-4 px-4">My App</div>
+          <ul className="menu">
+            {menuItems}
+          </ul>
+        </div>
+        <div>
+          {user && (
+            <div className="p-2 mb-2 text-center text-xs">
+              <p>Signed in as:</p>
+              <p className="font-semibold truncate">{user.email}</p>
+            </div>
+          )}
+          <button 
+            onClick={handleLogoutClick} 
+            className="btn btn-ghost w-full justify-start text-red-500 hover:bg-red-500 hover:text-white"
+          >
+            <LogOut size={18} /> Logout
+          </button>
+        </div>
       </aside>
 
       {/* Page Content */}

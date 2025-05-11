@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  },
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ESNext",
+    "allowSyntheticDefaultImports": true,
+    "paths": {
+      "*": ["node_modules/*", "src/*"]
+    }
+  },
+  "include": [
+    "electron/**/*.ts",
+    "forge.env.d.ts",
+    "agent/**/*.ts",
+    "src/**/*.ts"
+  ]
+}
