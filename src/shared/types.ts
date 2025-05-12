@@ -52,7 +52,7 @@ export interface FilterScore {
   readonly confidence: number; // 0-1
 }
 
-export type ApplicationStatus = 'not_applied' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'ghosted';
+export type ApplicationStatus = 'not_applied' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'ghosted' | 'error' | 'dry_run_complete' | 'submitted';
 
 export interface DecisionNode {
   readonly title: string;

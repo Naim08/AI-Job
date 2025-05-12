@@ -4,6 +4,7 @@ import * as os from 'os';
 import keytar from 'keytar';
 import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
+import fs from 'node:fs/promises';
 
 // Simple debug function since the import is failing
 const debug = (scope: string, ...args: unknown[]) => {
@@ -65,6 +66,26 @@ export async function clearSession(): Promise<void> {
   debug('session', 'Clearing stored session state...');
   await keytar.deletePassword('jobbot', STATE_KEY);
   debug('session', 'Session state cleared');
+}
+
+// --- Function to export storage state ---
+async function exportStorageState() {
+  console.log('Attempting to retrieve stored session state from keytar for export...');
+  const storedStateString = await keytar.getPassword('jobbot', STATE_KEY);
+
+  if (storedStateString) {
+    console.log('Successfully retrieved stored state from keytar.');
+    const filePath = path.resolve(process.cwd(), 'linkedin-auth.json');
+    try {
+      await fs.writeFile(filePath, storedStateString);
+      console.log(`Storage state JSON saved to: ${filePath}`);
+      console.log('You can now use this with Playwright Codegen: npx playwright codegen --load-storage=linkedin-auth.json <URL>');
+    } catch (err) {
+      console.error(`Error writing storage state to file: ${filePath}`, err);
+    }
+  } else {
+    console.log('No stored state found in keytar. Please ensure you have logged in successfully via a script that uses ensureSession.');
+  }
 }
 
 async function manualTest() {
@@ -141,5 +162,11 @@ async function manualTest() {
 
 // Use ES module import.meta.url check instead of require.main
 if (import.meta.url === `file://${process.argv[1]}`) {
-  manualTest().catch(console.error);
+  if (process.argv[2] === 'export-auth') {
+    exportStorageState().catch(console.error);
+  } else if (process.argv[2] === 'clear-auth') {
+    clearSession().catch(console.error);
+  } else {
+    manualTest().catch(console.error);
+  }
 } 

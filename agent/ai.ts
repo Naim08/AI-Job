@@ -4,6 +4,7 @@ import util from 'util';
 import fs from 'fs'; // Added for reading PDF files
 import { Ollama } from 'ollama';
 import dotenv from 'dotenv';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 // Try importing getDocument directly from the main package entry, hoping TS resolves types correctly.
 // If DOMMatrix error persists, it means this isn't using the legacy/node build internally.
 // import { getDocument } from 'pdfjs-dist'; 
@@ -312,8 +313,9 @@ export async function generateAnswers(
 
 export async function generateCoverLetter(
   user: UserProfile,
-  job: JobListing
-): Promise<string> {
+  job: JobListing,
+  options?: { savePdf?: boolean, outputPath?: string }
+): Promise<{ text: string; pdfPath?: string }> {
   log(`[generateCoverLetter] Getting placeholder embeddings.`);
   const vec = Array(100).fill(0); // Placeholder for actual embedding vector if needed for context retrieval
   log(`[generateCoverLetter] Querying resume and FAQ chunks.`);
@@ -357,5 +359,169 @@ Instruction: Write a 3-paragraph cover letter for this job application. Wrap bet
   }
   if (letter.length > 2000) letter = letter.slice(0,1997) + '...';
   log(`[generateCoverLetter] Cover letter generated. Length: ${letter.length}`);
-  return letter;
+
+  // If PDF saving is requested
+  let pdfPath: string | undefined = undefined;
+  if (options?.savePdf) {
+    try {
+      // Import PDF generation library dynamically to avoid dependency when not needed
+      const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
+      
+      // Create a new PDF document
+      const pdfDoc = await PDFDocument.create();
+      
+      // Add a page to the document
+      const page = pdfDoc.addPage([612, 792]); // US Letter size
+      
+      // Embed the standard font
+      const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+      const boldFont = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+      
+      // Set text properties
+      const fontSize = 12;
+      const lineHeight = fontSize * 1.2;
+      const margin = 72; // 1 inch margin
+      
+      // Format date
+      const currentDate = new Date();
+      const formattedDate = currentDate.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric', 
+        year: 'numeric'
+      });
+      
+      // Draw letterhead
+      page.drawText(user.name, {
+        x: margin,
+        y: 792 - margin - fontSize,
+        size: fontSize + 2,
+        font: boldFont
+      });
+      
+      page.drawText(user.email, {
+        x: margin,
+        y: 792 - margin - fontSize * 2 - 5,
+        size: fontSize,
+        font: font
+      });
+      
+      page.drawText(formattedDate, {
+        x: margin,
+        y: 792 - margin - fontSize * 4 - 10,
+        size: fontSize,
+        font: font
+      });
+      
+      // Draw company info (if available)
+      page.drawText(`${job.company}`, {
+        x: margin,
+        y: 792 - margin - fontSize * 6 - 15,
+        size: fontSize,
+        font: boldFont
+      });
+      
+      page.drawText(`Re: ${job.title}`, {
+        x: margin,
+        y: 792 - margin - fontSize * 7 - 20,
+        size: fontSize,
+        font: font
+      });
+      
+      // Draw salutation
+      page.drawText("Dear Hiring Manager,", {
+        x: margin,
+        y: 792 - margin - fontSize * 9 - 30,
+        size: fontSize,
+        font: font
+      });
+      
+      // Draw the cover letter text - handle line wrapping
+      const maxWidth = 612 - (margin * 2);
+      const words = letter.split(/\s+/);
+      let line = "";
+      let y = 792 - margin - fontSize * 11 - 35;
+      
+      // Process paragraph by paragraph
+      const paragraphs = letter.split(/\n\n+/);
+      
+      for (const paragraph of paragraphs) {
+        const words = paragraph.split(/\s+/);
+        line = "";
+        
+        for (const word of words) {
+          const testLine = line ? line + " " + word : word;
+          const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+          
+          if (testWidth > maxWidth) {
+            page.drawText(line, {
+              x: margin,
+              y,
+              size: fontSize,
+              font: font
+            });
+            line = word;
+            y -= lineHeight;
+            
+            // Add a new page if we run out of space
+            if (y < margin) {
+              const newPage = pdfDoc.addPage([612, 792]);
+              y = 792 - margin - fontSize;
+            }
+          } else {
+            line = testLine;
+          }
+        }
+        
+        // Draw the last line of the paragraph
+        if (line) {
+          page.drawText(line, {
+            x: margin,
+            y,
+            size: fontSize,
+            font: font
+          });
+          y -= lineHeight * 2; // Double space between paragraphs
+        }
+      }
+      
+      // Draw closing
+      y -= lineHeight * 0.5;
+      page.drawText("Sincerely,", {
+        x: margin,
+        y,
+        size: fontSize,
+        font: font
+      });
+      
+      y -= lineHeight * 3;
+      page.drawText(user.name, {
+        x: margin,
+        y,
+        size: fontSize,
+        font: font
+      });
+      
+      // Determine the output path
+      pdfPath = options.outputPath || path.join(
+        process.cwd(), 
+        'output', 
+        `cover-letter-${job.company.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${Date.now()}.pdf`
+      );
+      
+      // Ensure the directory exists
+      const outputDir = path.dirname(pdfPath);
+      fs.mkdirSync(outputDir, { recursive: true });
+      
+      // Save the PDF
+      const pdfBytes = await pdfDoc.save();
+      fs.writeFileSync(pdfPath, pdfBytes);
+      
+      log(`[generateCoverLetter] Cover letter saved as PDF: ${pdfPath}`);
+    } catch (error: any) {
+      log(`[generateCoverLetter] Error saving PDF: ${error.message}`);
+      console.error('[generateCoverLetter] PDF generation error:', error);
+    }
+  }
+
+  return { text: letter, pdfPath };
 }
