@@ -1,6 +1,6 @@
 import { BrowserContext, Page } from 'playwright';
 import { UserProfile, JobListing } from '../src/shared/types.js';
-import { ensureSession } from './session.js';
+import { ensureSession, isCheckpoint } from './session.js';
 import { scoreJob } from './filter.js';
 import { supabase } from '../src/lib/supabaseClient.js';
 import debug from 'debug';
@@ -60,6 +60,15 @@ export async function scanLinkedInJobs(user: UserProfile): Promise<void> {
         try {
           log(`Opening ${url}`);
           await page.goto(url, { waitUntil: 'domcontentloaded' });
+          if (isCheckpoint(page.url())) {
+            log('LinkedIn checkpoint detected. Pausing agent and notifying user.');
+            // Notify the main process to show the CAPTCHA modal
+            // In Electron context this will be available
+            if (typeof window !== 'undefined' && window.electronAPI) {
+              await window.electronAPI.captchaNeeded();
+            }
+            throw new Error('LinkedIn checkpoint detected. Manual intervention required.');
+          }
           
           // 4. Wait for job results to load
           log('Waiting for job search results to render');

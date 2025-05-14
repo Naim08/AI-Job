@@ -13,6 +13,7 @@ export interface UserProfileSettings {
   jobSearchSettings?: Array<string> | null;
   jobSearchLocation?: Array<string> | null;
   // ... existing code ...
+  active_model?: string;
 }
 
 export interface ResumeChunk {

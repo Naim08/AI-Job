@@ -1,6 +1,6 @@
 import { Page, BrowserContext } from 'playwright';
 import { UserProfile, JobListing, Answer, ApplicationStatus } from '../src/shared/types.js';
-import { ensureSession } from './session.js';
+import { ensureSession, isCheckpoint } from './session.js';
 import { supabase } from '../src/lib/supabaseClient.js';
 import { debug } from '../electron/utils/debug.js';
 
@@ -57,6 +57,15 @@ export async function applyToJob(
       }
       page = await context.newPage();
       await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      if (isCheckpoint(page.url())) {
+        debug('jobot:apply', 'Checkpoint detected on job page load. Pausing and notifying user.');
+        // Notify the main process to show the CAPTCHA modal
+        // In Electron context this will be available
+        if (typeof window !== 'undefined' && window.electronAPI) {
+          await window.electronAPI.captchaNeeded();
+        }
+        throw new Error('LinkedIn checkpoint detected. Manual intervention required.');
+      }
       await randomDelay(2000, 2000); // Fixed 2s delay after navigation
 
       debug('jobot:apply', 'Navigated to job page:', job.url);

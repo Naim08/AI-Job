@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import AppLayout, { PageName } from './components/AppLayout';
 import HistoryPage from './pages/HistoryPage';
@@ -6,9 +6,27 @@ import ActivityPage from './pages/ActivityPage';
 import SettingsPage from './pages/SettingsPage';
 import { AuthGate } from './components/AuthGate';
 import './index.css'; // Ensure Tailwind/DaisyUI styles are imported
+import CaptchaModal from './components/CaptchaModal';
 
 function App() {
   const [activePage, setActivePage] = useState<PageName>('history');
+  const [showCaptchaModal, setShowCaptchaModal] = useState(false);
+  
+  useEffect(() => {
+    // Set up listener for captcha detection events from main process
+    const handleCaptchaDetected = () => {
+      console.log('LinkedIn checkpoint detected, showing CAPTCHA modal');
+      setShowCaptchaModal(true);
+    };
+    
+    // Add event listener
+    window.addEventListener('captcha-detected', handleCaptchaDetected);
+    
+    // Clean up on unmount
+    return () => {
+      window.removeEventListener('captcha-detected', handleCaptchaDetected);
+    };
+  }, []);
 
   const renderPage = () => {
     switch (activePage) {
@@ -23,19 +41,33 @@ function App() {
     }
   };
 
+  // Handler for when user clicks Resume on CaptchaModal
+  const handleCaptchaResume = () => {
+    setShowCaptchaModal(false);
+    // Note: The actual resume-agent IPC call is handled inside the CaptchaModal component
+  };
+  
   return (
-    <AuthGate>
-      {(user, logout) => (
-        <AppLayout 
-          user={user} 
-          onLogout={logout} 
-          activePage={activePage} 
-          onPageChange={setActivePage}
-        >
-          {renderPage()}
-        </AppLayout>
-      )}
-    </AuthGate>
+    <>
+      <AuthGate>
+        {(user, logout) => (
+          <AppLayout 
+            user={user} 
+            onLogout={logout} 
+            activePage={activePage} 
+            onPageChange={setActivePage}
+          >
+            {renderPage()}
+          </AppLayout>
+        )}
+      </AuthGate>
+      
+      <CaptchaModal 
+        isOpen={showCaptchaModal}
+        onClose={() => setShowCaptchaModal(false)}
+        onResume={handleCaptchaResume}
+      />
+    </>
   );
 }
 

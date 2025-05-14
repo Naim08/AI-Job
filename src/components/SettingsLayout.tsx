@@ -8,12 +8,15 @@ import { debug } from '../../electron/utils/debug';
 import { supabase } from '../lib/supabaseClient';
 import { UserProfile } from '../shared/types';
 
-type TabId = 'filters' | 'faq' | 'blacklist' | 'resume' | 'profile';
+import { ModelPanel } from './ModelPanel';
+type TabId = 'filters' | 'faq' | 'blacklist' | 'resume' | 'profile' | 'models';
 
 export const SettingsLayout: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('profile');
   const [user, setUser] = useState<UserProfile | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [userSettings, setUserSettings] = useState<UserProfile['settings']>(null);
+
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -52,6 +55,7 @@ export const SettingsLayout: React.FC = () => {
                   avatar_url: dbProfileData.avatar_url,
               };
               setUser(userProfile);
+              setUserSettings(dbProfileData.settings);
           } else {
               debug('settings', 'No profile data found for user, using auth data minimally.');
               const fallbackName = (authUser.user_metadata as {full_name?: string})?.full_name || authUser.email || 'User';
@@ -97,6 +101,21 @@ export const SettingsLayout: React.FC = () => {
         return userId ? <ResumePanel userId={userId} /> : <p>User ID not available for resume.</p>;
       case 'profile':
         return userId ? <ProfilePanel userId={userId} /> : <p>User ID not available for profile.</p>;
+      case 'models':
+        return (
+          <ModelPanel
+            userSettings={userSettings || undefined}
+            onSetActive={async (model) => {
+              if (!userId) return;
+              // Update Supabase and local state
+              const { error } = await supabase
+                .from('profiles')
+                .update({ settings: { ...userSettings, active_model: model } })
+                .eq('user_id', userId);
+              if (!error) setUserSettings(s => ({ ...s, active_model: model }));
+            }}
+          />
+        );
       default:
         return null;
     }
@@ -143,6 +162,13 @@ export const SettingsLayout: React.FC = () => {
           onClick={() => handleTabClick('resume')}
         >
           Résumé
+        </a>
+        <a
+          role="tab"
+          className={`tab ${activeTab === 'models' ? 'tab-active' : ''}`}
+          onClick={() => handleTabClick('models')}
+        >
+          AI Models
         </a>
       </div>
       <div className="flex-grow p-4 bg-base-100 rounded-b-box shadow">

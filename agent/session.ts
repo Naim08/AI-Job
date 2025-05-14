@@ -169,4 +169,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else {
     manualTest().catch(console.error);
   }
+}
+
+export function isCheckpoint(url: string): boolean {
+  return url.includes('/checkpoint/') || url.includes('/uas/oauth');
 } 
