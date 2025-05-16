@@ -39,6 +39,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ open, onClose, selecte
                 needs_review: typeof rawItem.needs_review === 'boolean' 
                                 ? rawItem.needs_review 
                                 : ((rawItem.answer ?? '') as string).trim().length === 0,
+                confidence: typeof rawItem.confidence === 'number' ? rawItem.confidence : 0.5,
                 refs: (rawItem.refs || []) as readonly string[],
               } as Answer;
             }));
@@ -51,7 +52,12 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ open, onClose, selecte
     setAnswers(ans =>
       ans.map((a, i) =>
         i === idx
-          ? { ...a, answer: value.slice(0, 500), needs_review: value.trim().length === 0 }
+          ? { 
+              ...a, 
+              answer: value.slice(0, 500), 
+              confidence: value.trim().length === 0 ? 0 : a.confidence,
+              needs_review: value.trim().length === 0 ? true : (a.confidence ?? 0) < 0.65,
+            }
           : a
       )
     );
@@ -62,7 +68,11 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ open, onClose, selecte
     for (const ans of answers) {
       await supabase
         .from('application_answers')
-        .update({ answer: ans.answer, needs_review: ans.needs_review })
+        .update({ 
+          answer: ans.answer, 
+          needs_review: ans.needs_review, 
+          confidence: ans.confidence 
+        })
         .eq('id', ans.id as string);
     }
     await supabase
@@ -102,13 +112,27 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ open, onClose, selecte
               return (
                 <div key={ans.id} className="mb-4">
                   <label className="block font-semibold mb-1">Q: {ans.question}</label>
-                  <textarea
-                    className={`textarea textarea-bordered w-full ${borderClass}`}
-                    value={ans.answer ?? ''}
-                    maxLength={500}
-                    rows={3}
-                    onChange={e => handleEdit(idx, e.target.value)}
-                  />
+                  <div className="flex items-center">
+                    <textarea
+                      className={`textarea textarea-bordered w-full ${borderClass}`}
+                      value={ans.answer ?? ''}
+                      maxLength={500}
+                      rows={3}
+                      onChange={e => handleEdit(idx, e.target.value)}
+                    />
+                    {typeof ans.confidence === 'number' && (
+                      <span className="badge badge-sm ml-2"
+                            style={{
+                              backgroundColor: 
+                                ans.confidence >= 0.8 ? '#16a34a' : // green-600
+                                ans.confidence >= 0.65 ? '#fbbf24' : // amber-400
+                                '#dc2626', // red-600
+                              color: 'white' // Ensuring text is visible
+                            }}>
+                        {ans.confidence.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -118,7 +142,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ open, onClose, selecte
         <div className="modal-action flex gap-2">
           <button 
             className="btn btn-success" 
-            disabled={saving || answers.some(a => a.needs_review && (a.answer ?? '').trim().length === 0)} 
+            disabled={saving || answers.some(a => (a.confidence ?? 0) < 0.65 || (a.answer ?? '').trim().length === 0)} 
             onClick={handleApprove}
           >
             Approve & Apply

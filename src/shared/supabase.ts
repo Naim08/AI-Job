@@ -13,6 +13,7 @@ export type Database = {
         Row: {
           answer: string | null
           application_id: string
+          confidence: number | null
           created_at: string
           id: string
           needs_review: boolean | null
@@ -21,6 +22,7 @@ export type Database = {
         Insert: {
           answer?: string | null
           application_id: string
+          confidence?: number | null
           created_at?: string
           id?: string
           needs_review?: boolean | null
@@ -29,6 +31,7 @@ export type Database = {
         Update: {
           answer?: string | null
           application_id?: string
+          confidence?: number | null
           created_at?: string
           id?: string
           needs_review?: boolean | null
@@ -73,6 +76,7 @@ export type Database = {
           answer: string
           created_at: string
           id: string
+          last_learned_at: string | null
           question: string
           user_id: string | null
         }
@@ -80,6 +84,7 @@ export type Database = {
           answer: string
           created_at?: string
           id?: string
+          last_learned_at?: string | null
           question: string
           user_id?: string | null
         }
@@ -87,6 +92,7 @@ export type Database = {
           answer?: string
           created_at?: string
           id?: string
+          last_learned_at?: string | null
           question?: string
           user_id?: string | null
         }

@@ -1,4 +1,4 @@
-import { UserProfile } from "../src/shared/types.js";
+import { UserProfile, FAQ } from "../src/shared/types.js";
 import { TablesInsert } from "../src/shared/supabase.js";
 import debug from "debug";
 import crypto from "crypto";
@@ -431,6 +431,11 @@ export async function syncEmbeddings(user: UserProfile): Promise<void> {
     `Embedding sync finished for user ${user.id}. Total chunks processed: ${totalChunksProcessed}, Total chunks upserted: ${totalChunksUpserted}.`
   );
   console.log(`Synced ${totalChunksUpserted} chunks for user ${user.id}.`);
+}
+
+export async function embedFaqEntry(faq: FAQ): Promise<void> {
+  console.log("Embedding FAQ entry:", faq.question);
+  // Add logic to generate and save embedding
 }
 
 async function runCli() {
