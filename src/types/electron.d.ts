@@ -13,6 +13,7 @@ export interface IElectronAPI {
   triggerSyncEmbeddings: (userId: string) => Promise<{ success: boolean; error?: string }>;
   captchaNeeded: () => Promise<any>;
   retryOllama: () => void;
+  applyQueued: (appId: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 // Augment the Window interface

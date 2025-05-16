@@ -99,7 +99,7 @@ export const ModelPanel: React.FC<{ userSettings?: UserProfileSettings; onSetAct
     return (
       <div className="flex flex-col items-center justify-center h-40">
         <span className="text-lg mb-2">Ollama CLI not found.</span>
-        <button className="btn btn-primary" onClick={() => window.electron?.shell?.openExternal?.('https://ollama.ai') || window.open('https://ollama.ai', '_blank')}>Download Ollama CLI</button>
+        <button className="btn btn-primary" onClick={() => window.Electron?.shell?.openExternal?.('https://ollama.ai') || window.open('https://ollama.ai', '_blank')}>Download Ollama CLI</button>
       </div>
     );
   }

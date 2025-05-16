@@ -20,7 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chooseFile: () => ipcRenderer.invoke('choose-file'),
   openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
   triggerSyncEmbeddings: (userId: string) => ipcRenderer.invoke('trigger-sync-embeddings', userId),
-  retryOllama: () => ipcRenderer.send('ollama-retry')
+  retryOllama: () => ipcRenderer.send('ollama-retry'),
+  applyQueued: (appId: string) => ipcRenderer.invoke('apply-queued', appId)
 } as const);
 
 console.log('[Preload Script] Executing preload script...');

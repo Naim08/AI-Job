@@ -65,4 +65,6 @@ export interface Answer {
   readonly question: string;
   readonly answer: string;
   readonly refs: ReadonlyArray<string>;
+  readonly id?: string;
+  needs_review?: boolean;
 } 

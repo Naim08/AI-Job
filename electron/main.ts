@@ -352,6 +352,73 @@ app.whenReady().then(async () => {
       };
     }
   });
+
+  ipcMain.handle('apply-queued', async (_event, appId: string) => {
+    console.log(`[Main Process] IPC: apply-queued for appId ${appId}`);
+    let jobApplication: Tables<"job_applications"> | null = null;
+
+    try {
+      // 1. Fetch job application from DB
+      const { data: fetchedJobApplication, error: jobAppError } = await supabase
+        .from('job_applications')
+        .select('*')
+        .eq('id', appId)
+        .single<Tables<"job_applications">>();
+
+      if (jobAppError) throw jobAppError;
+      if (!fetchedJobApplication) throw new Error(`Job application with id ${appId} not found.`);
+      jobApplication = fetchedJobApplication;
+
+      // Fetch associated answers
+      const { data: answers, error: answersError } = await supabase
+        .from('application_answers')
+        .select('*')
+        .eq('application_id', appId);
+
+      if (answersError) {
+        // Log warning but proceed, answers might not always be present or strictly required for all steps
+        console.warn(`[Main Process] Could not fetch answers for job application ${appId}:`, answersError.message);
+      }
+
+      // 2. Call agent/apply.applyToJob (Placeholder)
+      // const applyResult = await applyToJob(jobApplication, answers || []); 
+      // console.log('[Main Process] applyToJob result:', applyResult);
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate async work
+
+      const jobTitle = jobApplication.job_title || `Application ID ${appId}`;
+      console.log(`[Main Process] Simulating applyToJob for: ${jobTitle}`);
+
+      // 3. Update status to 'submitted'
+      const { error: updateError } = await supabase
+        .from('job_applications')
+        .update({ status: 'submitted', updated_at: new Date().toISOString() })
+        .eq('id', appId);
+
+      if (updateError) throw updateError;
+
+      console.log(`[Main Process] Job application ${appId} status updated to submitted.`);
+      return { success: true, message: `Application for ${jobTitle} marked as submitted.` };
+
+    } catch (error) {
+      console.error(`[Main Process] Error in apply-queued for appId ${appId}:`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Attempt to update status to 'error' in DB
+      if (appId) { // Only attempt update if appId is valid
+        try {
+          await supabase
+            .from('job_applications')
+            .update({ status: 'error', reason: errorMessage, updated_at: new Date().toISOString() })
+            .eq('id', appId);
+          console.log(`[Main Process] Job application ${appId} status updated to error.`);
+        } catch (dbUpdateError) {
+          console.error(`[Main Process] Failed to update job application ${appId} status to error:`, dbUpdateError);
+        }
+      }
+      return { success: false, error: errorMessage };
+    }
+  });
+
   // --- End of IPC Handlers ---
 
   createMainWindow();
