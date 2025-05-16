@@ -15,6 +15,7 @@ import { UserProfile, UserProfileSettings } from "../src/shared/types.js"; // Ad
 import type { Database, Tables } from "../src/shared/supabase.js"; // Import Supabase generated types
 import dotenv from "dotenv";
 dotenv.config();
+import { JobScheduler } from "../agent/JobScheduler.js"; // Import JobScheduler
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (squirrelStartup) {
@@ -97,6 +98,10 @@ function createMainWindow() {
 app.whenReady().then(async () => {
   console.log("[Main Process] App is ready.");
 
+  // Start JobScheduler singleton
+  const scheduler = JobScheduler.getInstance();
+  scheduler.start();
+
   // --- IPC Handlers (from our refined electron/main.ts) ---
   // Captcha and agent pause/resume handlers
 
@@ -124,7 +129,8 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("pause-agent", async () => {
     console.debug("[Main Process] IPC: pause-agent invoked.");
-    return { status: "Agent pause signal received" };
+    JobScheduler.getInstance().pause();
+    return { status: "paused" };
   });
 
   ipcMain.handle("captcha-needed", async () => {
@@ -139,8 +145,12 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("resume-agent", async () => {
     console.debug("[Main Process] IPC: resume-agent invoked.");
-    // Clear pause flag and resume JobScheduler operations
-    return { status: "Agent resume signal received" };
+    JobScheduler.getInstance().resume();
+    return { status: "resumed" };
+  });
+
+  ipcMain.handle("agent-status", async () => {
+    return JobScheduler.getInstance().getStatus();
   });
 
   ipcMain.handle("open-captcha", async () => {

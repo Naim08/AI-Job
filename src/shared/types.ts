@@ -1,3 +1,8 @@
+export interface FAQ {
+  readonly id: string;
+  readonly user_id: string; // Note: snake_case
+  // ...
+}
 export interface UserProfile {
   readonly id: string;
   name: string;
@@ -25,13 +30,17 @@ export interface ResumeChunk {
 
 export interface FAQ {
   readonly id: string;
+  readonly user_id: string;
   readonly question: string;
   readonly answer: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly last_learned_at?: string;
 }
 
 export interface BlacklistItem {
   readonly id: string;
-  readonly type: 'company' | 'keyword';
+  readonly type: "company" | "keyword";
   readonly value: string;
 }
 
@@ -53,7 +62,16 @@ export interface FilterScore {
   readonly confidence: number; // 0-1
 }
 
-export type ApplicationStatus = 'not_applied' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'ghosted' | 'error' | 'dry_run_complete' | 'submitted';
+export type ApplicationStatus =
+  | "not_applied"
+  | "applied"
+  | "interviewing"
+  | "offer"
+  | "rejected"
+  | "ghosted"
+  | "error"
+  | "dry_run_complete"
+  | "submitted";
 
 export interface DecisionNode {
   readonly title: string;
@@ -67,4 +85,5 @@ export interface Answer {
   readonly refs: ReadonlyArray<string>;
   readonly id?: string;
   needs_review?: boolean;
-} 
+  confidence?: number; // 0-1
+}
