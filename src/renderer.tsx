@@ -1,40 +1,41 @@
-import React, { useState, useEffect } from 'react';
-import ReactDOM from 'react-dom/client';
-import AppLayout, { PageName } from './components/AppLayout';
-import HistoryPage from './pages/HistoryPage';
-import ActivityPage from './pages/ActivityPage';
-import SettingsPage from './pages/SettingsPage';
-import { AuthGate } from './components/AuthGate';
-import './index.css'; // Ensure Tailwind/DaisyUI styles are imported
-import CaptchaModal from './components/CaptchaModal';
+import React, { useState, useEffect } from "react";
+import ReactDOM from "react-dom/client";
+import AppLayout, { PageName } from "./components/AppLayout";
+import HistoryPage from "./pages/HistoryPage";
+import ActivityPage from "./pages/ActivityPage";
+import SettingsPage from "./pages/SettingsPage";
+import { AuthGate } from "./components/AuthGate";
+import "./index.css"; // Ensure Tailwind/DaisyUI styles are imported
+import CaptchaModal from "./components/CaptchaModal";
+import { ActivityProvider } from "./contexts/ActivityContext"; // Import ActivityProvider
 
 function App() {
-  const [activePage, setActivePage] = useState<PageName>('history');
+  const [activePage, setActivePage] = useState<PageName>("history");
   const [showCaptchaModal, setShowCaptchaModal] = useState(false);
-  
+
   useEffect(() => {
     // Set up listener for captcha detection events from main process
     const handleCaptchaDetected = () => {
-      console.log('LinkedIn checkpoint detected, showing CAPTCHA modal');
+      console.log("LinkedIn checkpoint detected, showing CAPTCHA modal");
       setShowCaptchaModal(true);
     };
-    
+
     // Add event listener
-    window.addEventListener('captcha-detected', handleCaptchaDetected);
-    
+    window.addEventListener("captcha-detected", handleCaptchaDetected);
+
     // Clean up on unmount
     return () => {
-      window.removeEventListener('captcha-detected', handleCaptchaDetected);
+      window.removeEventListener("captcha-detected", handleCaptchaDetected);
     };
   }, []);
 
   const renderPage = () => {
     switch (activePage) {
-      case 'history':
+      case "history":
         return <HistoryPage />;
-      case 'activity':
+      case "activity":
         return <ActivityPage />;
-      case 'settings':
+      case "settings":
         return <SettingsPage />;
       default:
         return null;
@@ -46,36 +47,36 @@ function App() {
     setShowCaptchaModal(false);
     // Note: The actual resume-agent IPC call is handled inside the CaptchaModal component
   };
-  
+
   return (
-    <>
+    <ActivityProvider>
       <AuthGate>
         {(user, logout) => (
-          <AppLayout 
-            user={user} 
-            onLogout={logout} 
-            activePage={activePage} 
+          <AppLayout
+            user={user}
+            onLogout={logout}
+            activePage={activePage}
             onPageChange={setActivePage}
           >
             {renderPage()}
           </AppLayout>
         )}
       </AuthGate>
-      
-      <CaptchaModal 
+
+      <CaptchaModal
         isOpen={showCaptchaModal}
         onClose={() => setShowCaptchaModal(false)}
         onResume={handleCaptchaResume}
       />
-    </>
+    </ActivityProvider>
   );
 }
 
 // Ensure there's an element to render into, or create one.
-let rootElement = document.getElementById('root');
+let rootElement = document.getElementById("root");
 if (!rootElement) {
-  rootElement = document.createElement('div');
-  rootElement.id = 'root';
+  rootElement = document.createElement("div");
+  rootElement.id = "root";
   document.body.appendChild(rootElement);
 }
 
@@ -85,4 +86,4 @@ root.render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
-); 
+);

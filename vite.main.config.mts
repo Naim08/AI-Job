@@ -22,6 +22,9 @@ export default defineConfig({
         /^node:.*/, // Exclude Node.js built-in modules
         'agentkeepalive',
         '@langchain/openai',
+        'node-schedule',
+        'keytar',
+        'playwright',
         // 'canvas',     // No longer needed
         // 'pdfjs-dist'  // No longer needed
       ],

@@ -1,35 +1,58 @@
-import { contextBridge, ipcRenderer } from 'electron';
-console.log('[Preload] 🎉 preload.js running');
+import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
+import type { AgentStatus } from "../src/types/electron.js";
+console.log("[Preload] 🎉 preload.js running");
 
-contextBridge.exposeInMainWorld('electronAPI', {
-  hasOllama: (): Promise<boolean> => ipcRenderer.invoke('ollama-has-cli'),
-  listOllama: (): Promise<{ name: string; installed: boolean; sizeMB: number }[]> => ipcRenderer.invoke('ollama-list'),
-  installOllama: (model: string): Promise<void> => ipcRenderer.invoke('ollama-install', model),
-  uninstallOllama: (model: string): Promise<void> => ipcRenderer.invoke('ollama-uninstall', model),
-  onOllamaProgress: (cb: (model: string, percent: number) => void): void => {
-    ipcRenderer.on('ollama-progress', (_e, model, percent) => cb(model, percent));
+contextBridge.exposeInMainWorld("electronAPI", {
+  hasOllama: () => ipcRenderer.invoke("ollama:has"),
+  listOllama: () => ipcRenderer.invoke("ollama:list"),
+  installOllama: (model: string) => ipcRenderer.invoke("ollama:install", model),
+  uninstallOllama: (model: string) =>
+    ipcRenderer.invoke("ollama:uninstall", model),
+  onOllamaProgress: (cb: (model: string, percent: number) => void) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      model: string,
+      percent: number
+    ) => cb(model, percent);
+    ipcRenderer.on("ollama:progress", handler);
+    return () => ipcRenderer.removeListener("ollama:progress", handler);
   },
   shell: {
-    openExternal: (url: string) => ipcRenderer.invoke('open-external', url)
+    openExternal: (url: string) => ipcRenderer.invoke("open-external", url),
   },
-  pauseAgent: () => ipcRenderer.invoke('pause-agent'),
-  resumeAgent: () => ipcRenderer.invoke('resume-agent'),
-  captchaNeeded: () => ipcRenderer.invoke('captcha-needed'),
-  openCaptcha: () => ipcRenderer.invoke('open-captcha'),
-  notify: (msg: string) => ipcRenderer.invoke('notify', msg),
-  chooseFile: () => ipcRenderer.invoke('choose-file'),
-  openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
-  triggerSyncEmbeddings: (userId: string) => ipcRenderer.invoke('trigger-sync-embeddings', userId),
-  retryOllama: () => ipcRenderer.send('ollama-retry'),
-  applyQueued: (appId: string) => ipcRenderer.invoke('apply-queued', appId)
+  pauseAgent: () => ipcRenderer.invoke("agent:pause"),
+  resumeAgent: () => ipcRenderer.invoke("agent:resume"),
+  getAgentStatus: () => ipcRenderer.invoke("agent:getStatus"),
+  onAgentStatus: (cb: (status: AgentStatus) => void) => {
+    const handler = (_event: IpcRendererEvent, status: AgentStatus) =>
+      cb(status);
+    ipcRenderer.on("agent:statusUpdate", handler);
+    return () => ipcRenderer.removeListener("agent:statusUpdate", handler);
+  },
+  openCaptcha: () => ipcRenderer.invoke("app:openCaptcha"),
+  notify: (msg: string) => ipcRenderer.invoke("app:notify", msg),
+  chooseFile: () => ipcRenderer.invoke("dialog:chooseFile"),
+  openFile: (filePath: string) => ipcRenderer.invoke("app:openFile", filePath),
+  triggerSyncEmbeddings: (userId: string) =>
+    ipcRenderer.invoke("supabase:triggerSyncEmbeddings", userId),
+  captchaNeeded: () => ipcRenderer.invoke("agent:captchaNeeded"),
+  retryOllama: () => ipcRenderer.send("ollama:retry"),
+  applyQueued: (appId: string) => ipcRenderer.invoke("job:applyQueued", appId),
+  onCaptchaNeeded: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("agent:captchaNeededGlobal", handler);
+    return () => {
+      ipcRenderer.removeListener("agent:captchaNeededGlobal", handler);
+    };
+  },
 } as const);
 
-console.log('[Preload Script] Executing preload script...');
+console.log("[Preload Script] Executing preload script...");
 try {
-  contextBridge.exposeInMainWorld('electronAPITest', {
-    ping: () => 'pong'
+  contextBridge.exposeInMainWorld("electronAPITest", {
+    ping: () => "pong",
   });
-  console.log('[Preload Script] electronAPITest exposed.');
+  console.log("[Preload Script] electronAPITest exposed.");
 } catch (e) {
-  console.error('[Preload Script] Error exposing API:', e);
-} 
+  console.error("[Preload Script] Error exposing API:", e);
+}

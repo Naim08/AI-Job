@@ -16,6 +16,7 @@ import type { Database, Tables } from "../src/shared/supabase.js"; // Import Sup
 import dotenv from "dotenv";
 dotenv.config();
 import { JobScheduler } from "../agent/JobScheduler.js"; // Import JobScheduler
+import type { AgentStatus } from "../src/types/electron.js"; // Reverted to .js extension
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (squirrelStartup) {
@@ -41,6 +42,44 @@ console.log(
 console.log(
   `[Main Process] VITE_NAME: ${MAIN_WINDOW_VITE_NAME || "not defined (global)"}`
 );
+
+// --- Agent Status Management ---
+// let currentAgentStatus: AgentStatus | null = null; // Not strictly needed if getStatus is always fresh
+
+async function getAndUpdateAgentStatus(): Promise<AgentStatus> {
+  const status = await JobScheduler.getInstance().getStatus();
+  // Assuming status from JobScheduler matches AgentStatus structure
+  // If not, map properties here:
+  // return { paused: status.isPaused, appliedHour: status.hour, appliedDay: status.day };
+  return status as AgentStatus;
+}
+
+function broadcastAgentStatus(status: AgentStatus) {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents && !win.webContents.isDestroyed()) {
+      console.log(
+        `[Main Process] Broadcasting agent:statusUpdate to window ${win.id}`
+      );
+      win.webContents.send("agent:statusUpdate", status);
+    }
+  });
+}
+
+async function initialStatusFetchAndBroadcast() {
+  try {
+    console.log(
+      "[Main Process] Attempting initial agent status fetch and broadcast."
+    );
+    const status = await getAndUpdateAgentStatus();
+    broadcastAgentStatus(status);
+    console.log("[Main Process] Initial agent status broadcasted.");
+  } catch (error) {
+    console.error(
+      "[Main Process] Error fetching/broadcasting initial agent status:",
+      error
+    );
+  }
+}
 
 function createMainWindow() {
   // --- Preload script path resolution (from our refined electron/main.ts) ---
@@ -102,55 +141,79 @@ app.whenReady().then(async () => {
   const scheduler = JobScheduler.getInstance();
   scheduler.start();
 
+  // Call initialStatusFetchAndBroadcast after scheduler is started and ready
+  // Placed after JobScheduler.getInstance().start() or where appropriate
+  // For example, if JobScheduler emits a 'ready' or 'started' event, listen to that.
+  // For now, calling it after a short delay or assuming getStatus will work after start.
+  // JobScheduler.getInstance().start(); // This is typically called earlier as per existing code.
+  // setTimeout(initialStatusFetchAndBroadcast, 1000); // Simple delay, or integrate with JobScheduler's lifecycle
+
   // --- IPC Handlers (from our refined electron/main.ts) ---
   // Captcha and agent pause/resume handlers
 
   // OLLAMA IPC HANDLERS
-  const { hasCli, listModels, installModel, uninstallModel } = await import('../agent/ollama.js');
-  ipcMain.handle('ollama-has-cli', async (): Promise<boolean> => {
+  const { hasCli, listModels, installModel, uninstallModel } = await import(
+    "../agent/ollama.js"
+  );
+  ipcMain.handle("ollama:has", async (): Promise<boolean> => {
+    console.debug("[Main Process] IPC: ollama:has invoked.");
     return hasCli();
   });
-  ipcMain.handle('ollama-list', async (): Promise<{ name: string; installed: boolean; sizeMB: number }[]> => {
-    return listModels();
-  });
-  ipcMain.handle('ollama-install', async (event, model: string): Promise<void> => {
-    const win = BrowserWindow.getFocusedWindow() || mainWindow;
-    await installModel(model, (line: string) => {
-      // Parse progress from line, e.g. 'Pulling... 42%'
-      const percentMatch = line.match(/(\d+)%/);
-      const percent = percentMatch ? parseInt(percentMatch[1], 10) : 0;
-      if (win) win.webContents.send('ollama-progress', model, percent);
-    });
-    if (win) win.webContents.send('ollama-progress', model, 100);
-  });
-  ipcMain.handle('ollama-uninstall', async (event, model: string): Promise<void> => {
-    await uninstallModel(model);
-  });
-
-  ipcMain.handle("pause-agent", async () => {
-    console.debug("[Main Process] IPC: pause-agent invoked.");
-    JobScheduler.getInstance().pause();
-    return { status: "paused" };
-  });
-
-  ipcMain.handle("captcha-needed", async () => {
-    console.debug(
-      "[Main Process] IPC: captcha-needed invoked. Notifying renderer."
-    );
-    if (mainWindow) {
-      mainWindow.webContents.send("captcha-detected");
+  ipcMain.handle(
+    "ollama:list",
+    async (): Promise<
+      { name: string; installed: boolean; sizeMB: number }[]
+    > => {
+      console.debug("[Main Process] IPC: ollama:list invoked.");
+      return listModels();
     }
-    return { status: "Captcha notification sent to renderer" };
+  );
+  ipcMain.handle(
+    "ollama:install",
+    async (event, model: string): Promise<void> => {
+      console.debug(`[Main Process] IPC: ollama:install invoked for ${model}.`);
+      const win = BrowserWindow.getFocusedWindow() || mainWindow;
+      await installModel(model, (line: string) => {
+        const percentMatch = line.match(/(\d+)%/);
+        const percent = percentMatch ? parseInt(percentMatch[1], 10) : 0;
+        if (win) win.webContents.send("ollama-progress", model, percent);
+      });
+      if (win) win.webContents.send("ollama-progress", model, 100);
+    }
+  );
+  ipcMain.handle(
+    "ollama:uninstall",
+    async (event, model: string): Promise<void> => {
+      console.debug(
+        `[Main Process] IPC: ollama:uninstall invoked for ${model}.`
+      );
+      await uninstallModel(model);
+    }
+  );
+
+  // New IPC Handlers as per spec
+  ipcMain.handle("agent:pause", async () => {
+    console.debug("[Main Process] IPC: agent:pause invoked.");
+    await JobScheduler.getInstance().pause();
+    const status = await getAndUpdateAgentStatus();
+    broadcastAgentStatus(status);
+    return status;
   });
 
-  ipcMain.handle("resume-agent", async () => {
-    console.debug("[Main Process] IPC: resume-agent invoked.");
-    JobScheduler.getInstance().resume();
-    return { status: "resumed" };
+  ipcMain.handle("agent:resume", async () => {
+    console.debug("[Main Process] IPC: agent:resume invoked.");
+    await JobScheduler.getInstance().resume();
+    const status = await getAndUpdateAgentStatus();
+    broadcastAgentStatus(status);
+    return status;
   });
 
-  ipcMain.handle("agent-status", async () => {
-    return JobScheduler.getInstance().getStatus();
+  ipcMain.handle("agent:getStatus", async () => {
+    console.debug("[Main Process] IPC: agent:getStatus invoked.");
+    const status = await getAndUpdateAgentStatus();
+    // No explicit broadcast here, as the status is returned directly.
+    // The component can update itself, and other windows would rely on broadcasts from state changes (pause/resume)
+    return status;
   });
 
   ipcMain.handle("open-captcha", async () => {
@@ -171,9 +234,9 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle("notify", async (_event, message: string) => {
+  ipcMain.handle("app:notify", async (_event, message: string) => {
     console.debug(
-      `[Main Process] IPC: notify invoked with message: "${message}"`
+      `[Main Process] IPC: app:notify invoked with message: "${message}"`
     );
     if (!Notification.isSupported()) {
       console.warn(
@@ -363,66 +426,88 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle('apply-queued', async (_event, appId: string) => {
+  ipcMain.handle("apply-queued", async (_event, appId: string) => {
     console.log(`[Main Process] IPC: apply-queued for appId ${appId}`);
     let jobApplication: Tables<"job_applications"> | null = null;
 
     try {
       // 1. Fetch job application from DB
       const { data: fetchedJobApplication, error: jobAppError } = await supabase
-        .from('job_applications')
-        .select('*')
-        .eq('id', appId)
+        .from("job_applications")
+        .select("*")
+        .eq("id", appId)
         .single<Tables<"job_applications">>();
 
       if (jobAppError) throw jobAppError;
-      if (!fetchedJobApplication) throw new Error(`Job application with id ${appId} not found.`);
+      if (!fetchedJobApplication)
+        throw new Error(`Job application with id ${appId} not found.`);
       jobApplication = fetchedJobApplication;
 
       // Fetch associated answers
       const { data: answers, error: answersError } = await supabase
-        .from('application_answers')
-        .select('*')
-        .eq('application_id', appId);
+        .from("application_answers")
+        .select("*")
+        .eq("application_id", appId);
 
       if (answersError) {
         // Log warning but proceed, answers might not always be present or strictly required for all steps
-        console.warn(`[Main Process] Could not fetch answers for job application ${appId}:`, answersError.message);
+        console.warn(
+          `[Main Process] Could not fetch answers for job application ${appId}:`,
+          answersError.message
+        );
       }
 
       // 2. Call agent/apply.applyToJob (Placeholder)
-      // const applyResult = await applyToJob(jobApplication, answers || []); 
+      // const applyResult = await applyToJob(jobApplication, answers || []);
       // console.log('[Main Process] applyToJob result:', applyResult);
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate async work
+      await new Promise((resolve) => setTimeout(resolve, 2000)); // Simulate async work
 
       const jobTitle = jobApplication.job_title || `Application ID ${appId}`;
       console.log(`[Main Process] Simulating applyToJob for: ${jobTitle}`);
 
       // 3. Update status to 'submitted'
       const { error: updateError } = await supabase
-        .from('job_applications')
-        .update({ status: 'submitted', updated_at: new Date().toISOString() })
-        .eq('id', appId);
+        .from("job_applications")
+        .update({ status: "submitted", updated_at: new Date().toISOString() })
+        .eq("id", appId);
 
       if (updateError) throw updateError;
 
-      console.log(`[Main Process] Job application ${appId} status updated to submitted.`);
-      return { success: true, message: `Application for ${jobTitle} marked as submitted.` };
-
+      console.log(
+        `[Main Process] Job application ${appId} status updated to submitted.`
+      );
+      return {
+        success: true,
+        message: `Application for ${jobTitle} marked as submitted.`,
+      };
     } catch (error) {
-      console.error(`[Main Process] Error in apply-queued for appId ${appId}:`, error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
+      console.error(
+        `[Main Process] Error in apply-queued for appId ${appId}:`,
+        error
+      );
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
       // Attempt to update status to 'error' in DB
-      if (appId) { // Only attempt update if appId is valid
+      if (appId) {
+        // Only attempt update if appId is valid
         try {
           await supabase
-            .from('job_applications')
-            .update({ status: 'error', reason: errorMessage, updated_at: new Date().toISOString() })
-            .eq('id', appId);
-          console.log(`[Main Process] Job application ${appId} status updated to error.`);
+            .from("job_applications")
+            .update({
+              status: "error",
+              reason: errorMessage,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", appId);
+          console.log(
+            `[Main Process] Job application ${appId} status updated to error.`
+          );
         } catch (dbUpdateError) {
-          console.error(`[Main Process] Failed to update job application ${appId} status to error:`, dbUpdateError);
+          console.error(
+            `[Main Process] Failed to update job application ${appId} status to error:`,
+            dbUpdateError
+          );
         }
       }
       return { success: false, error: errorMessage };
@@ -440,6 +525,9 @@ app.whenReady().then(async () => {
       createMainWindow();
     }
   });
+
+  // Make sure this is called after scheduler.start()
+  await initialStatusFetchAndBroadcast(); // Call it here
 });
 
 // Quit when all windows are closed, except on macOS.
