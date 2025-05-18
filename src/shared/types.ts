@@ -1,8 +1,3 @@
-export interface FAQ {
-  readonly id: string;
-  readonly user_id: string; // Note: snake_case
-  // ...
-}
 export interface UserProfile {
   readonly id: string;
   name: string;
@@ -86,4 +81,21 @@ export interface Answer {
   readonly id?: string;
   needs_review?: boolean;
   confidence?: number; // 0-1
+}
+
+export interface JobApplication {
+  readonly id: string; // Assuming an auto-generated ID from Supabase
+  readonly user_id: string;
+  readonly job_id: string; // This is often an external ID from the job board
+  job_title: string; // Added from DB schema
+  company_name: string; // Added from DB schema
+  job_url?: string | null; // Added from DB schema
+  status: ApplicationStatus;
+  error_message?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  applied_at?: string; // Added from DB schema (though named applied_at in DB, matching convention here)
+  job_description?: string | null; // Added from DB schema
+  notes?: string | null; // Added from DB schema
+  reason?: string | null; // Added from DB schema (often for error/rejected status)
 }

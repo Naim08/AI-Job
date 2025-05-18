@@ -68,6 +68,7 @@
     "keytar": "^7.9.0",
     "langchain": "^0.3.24",
     "lucide-react": "^0.417.0",
+    "node-schedule": "^2.1.1",
     "ollama": "^0.5.15",
     "path-browserify": "^1.0.1",
     "pdf-lib": "^1.17.1",

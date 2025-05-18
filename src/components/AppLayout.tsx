@@ -6,6 +6,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { User } from "@supabase/supabase-js";
+import ApplyToggle from "./ApplyToggle";
 
 export type PageName = "history" | "activity" | "settings";
 
@@ -117,6 +118,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
                 {user.email}
               </span>
             )}
+            <ApplyToggle />
           </div>
         </div>
 
@@ -135,6 +137,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({
                 <p className="font-semibold truncate">{user.email}</p>
               </div>
             )}
+            <div className="p-2">
+              <ApplyToggle />
+            </div>
             <button
               onClick={handleLogoutClick}
               className="btn btn-ghost w-full justify-start text-red-500 hover:bg-red-500 hover:text-white"
