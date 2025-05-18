@@ -155,23 +155,25 @@ app.whenReady().then(async () => {
   const { hasCli, listModels, installModel, uninstallModel } = await import(
     "../agent/ollama.js"
   );
-  ipcMain.handle("ollama-has-cli", async (): Promise<boolean> => {
+  ipcMain.handle("ollama:has", async (): Promise<boolean> => {
+    console.debug("[Main Process] IPC: ollama:has invoked.");
     return hasCli();
   });
   ipcMain.handle(
-    "ollama-list",
+    "ollama:list",
     async (): Promise<
       { name: string; installed: boolean; sizeMB: number }[]
     > => {
+      console.debug("[Main Process] IPC: ollama:list invoked.");
       return listModels();
     }
   );
   ipcMain.handle(
-    "ollama-install",
+    "ollama:install",
     async (event, model: string): Promise<void> => {
+      console.debug(`[Main Process] IPC: ollama:install invoked for ${model}.`);
       const win = BrowserWindow.getFocusedWindow() || mainWindow;
       await installModel(model, (line: string) => {
-        // Parse progress from line, e.g. 'Pulling... 42%'
         const percentMatch = line.match(/(\d+)%/);
         const percent = percentMatch ? parseInt(percentMatch[1], 10) : 0;
         if (win) win.webContents.send("ollama-progress", model, percent);
@@ -180,8 +182,11 @@ app.whenReady().then(async () => {
     }
   );
   ipcMain.handle(
-    "ollama-uninstall",
+    "ollama:uninstall",
     async (event, model: string): Promise<void> => {
+      console.debug(
+        `[Main Process] IPC: ollama:uninstall invoked for ${model}.`
+      );
       await uninstallModel(model);
     }
   );

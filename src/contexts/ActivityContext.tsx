@@ -10,6 +10,7 @@ import {
   setupNotifier,
   ActivityItem as NotifierActivityItem,
 } from "../lib/notifier"; // Renaming to avoid conflict if defined locally
+import type { AgentStatus } from "../types/electron"; // Import AgentStatus type
 
 // Re-exporting ActivityItem for convenience if components need it
 export type ActivityItem = NotifierActivityItem;
@@ -113,6 +114,63 @@ export const ActivityProvider: React.FC<{ children: ReactNode }> = ({
       }
     };
   }, [userId]); // This effect depends on userId
+
+  // Effect for listening to Agent Status changes from main process
+  useEffect(() => {
+    // This listener can be active even without a userId, as agent status is global.
+    // However, we only add activities if a user is effectively logged in (userId is present),
+    // or decide if agent status changes should be logged globally regardless of user session.
+    // For now, let's only add to activity log if there is a user context (userId).
+
+    if (!window.electronAPI || !window.electronAPI.onAgentStatus) {
+      console.warn(
+        "[ActivityProvider] electronAPI.onAgentStatus not available."
+      );
+      return;
+    }
+
+    console.log(
+      "[ActivityProvider] Setting up listener for agent:statusUpdate"
+    );
+    const cleanupAgentStatusListener = window.electronAPI.onAgentStatus(
+      (status: AgentStatus) => {
+        console.log("[ActivityProvider] Received agent:statusUpdate:", status);
+        if (!userId) {
+          // If no user, don't add to the (user-specific) activity log.
+          // Or, one could have a separate global log if needed.
+          console.log(
+            "[ActivityProvider] Agent status update received, but no user session to log against."
+          );
+          return;
+        }
+
+        const message = status.paused
+          ? "⏸️ Agent Paused"
+          : "▶️ Agent Resumed/Running";
+        const details = `Daily applications: ${status.appliedDay}, Hourly: ${status.appliedHour}`;
+
+        const newActivity: ActivityItem = {
+          id: `agent-status-${new Date().toISOString()}`,
+          message: message,
+          details: details,
+          timestamp: new Date().toISOString(),
+          type: status.paused ? "warning" : "info",
+        };
+        setActivities((prevActivities) =>
+          [newActivity, ...prevActivities].slice(0, 100)
+        );
+      }
+    );
+
+    return () => {
+      if (cleanupAgentStatusListener) {
+        console.log(
+          "[ActivityProvider] Cleaning up agent:statusUpdate listener."
+        );
+        cleanupAgentStatusListener();
+      }
+    };
+  }, [userId]); // Re-run if userId changes, to ensure logging context is correct
 
   return (
     <ActivityContext.Provider value={{ activities }}>
