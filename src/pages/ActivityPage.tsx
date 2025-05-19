@@ -28,9 +28,9 @@ const ActivityPage: React.FC = () => {
         </p>
       ) : (
         <div className="space-y-4">
-          {activities.map((activity) => (
+          {activities.map((activity, index) => (
             <div
-              key={activity.id}
+              key={`activity-${activity.id || index}`}
               className="p-4 rounded-lg shadow bg-base-100"
             >
               <div className="flex items-start">

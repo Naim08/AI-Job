@@ -39,8 +39,6 @@ export class JobScheduler {
     return JobScheduler._instance;
   }
 
-  private constructor() {}
-
   /** Auto-starts a cron that runs every 20 minutes. No-op if already started. */
   start(): void {
     if (this.job) return; // already started
@@ -124,14 +122,18 @@ export class JobScheduler {
           continue;
         }
 
-        const shouldMarkForReview = answers.some(a => a.needs_review);
+        const shouldMarkForReview = answers.some((a) => a.needs_review);
 
         if (shouldMarkForReview) {
           // mark for review
-          log(`Job ${job.id} has answers needing review or low confidence. Marking as pending_review.`);
-          await (supabase as any)
-            .from("job_applications")
-            .insert({ user_id: user.id, job_id: job.id, status: "pending_review" });
+          log(
+            `Job ${job.id} has answers needing review or low confidence. Marking as pending_review.`
+          );
+          await (supabase as any).from("job_applications").insert({
+            user_id: user.id,
+            job_id: job.id,
+            status: "pending_review",
+          });
           continue;
         }
 
@@ -145,7 +147,9 @@ export class JobScheduler {
           if (result === "submitted") {
             this.appliedHour += 1;
             this.appliedDay += 1;
-            log(`Application submitted. Hour ${this.appliedHour}/25, Day ${this.appliedDay}/45`);
+            log(
+              `Application submitted. Hour ${this.appliedHour}/25, Day ${this.appliedDay}/45`
+            );
           }
         } catch (err) {
           log("Error applying to job", err);

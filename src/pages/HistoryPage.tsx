@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
-import { ReviewModal } from '../components/ReviewModal';
-import { useModal } from '../lib/useModal';
-import type { ApplicationStatus, DecisionNode } from '../shared/types';
+import React, { useEffect, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { ReviewModal } from "../components/ReviewModal";
+import { useModal } from "../lib/useModal";
+import type { ApplicationStatus, DecisionNode } from "../shared/types";
 
 interface ApplicationRow {
   id: string;
@@ -18,16 +18,16 @@ const HistoryPage: React.FC = () => {
 
   useEffect(() => {
     supabase
-      .from('job_applications')
-      .select('id, job_title, company_name, status')
+      .from("job_applications")
+      .select("id, job_title, company_name, status")
       .then(({ data, error }) => {
         if (error) {
           console.error("Error fetching job applications:", error);
         } else {
-          const mappedData = (data || []).map(app => ({
+          const mappedData = (data || []).map((app) => ({
             ...app,
             id: app.id,
-            status: (app.status || 'pending_review') as ApplicationStatus,
+            status: (app.status || "pending_review") as ApplicationStatus,
           }));
           setApps(mappedData);
         }
@@ -40,9 +40,13 @@ const HistoryPage: React.FC = () => {
   };
 
   const handleStatusChange = (status: string) => {
-    setApps(apps => apps.map(a =>
-      a.id === selectedApp?.id ? { ...a, status: status as ApplicationStatus } : a
-    ));
+    setApps((apps) =>
+      apps.map((a) =>
+        a.id === selectedApp?.id
+          ? { ...a, status: status as ApplicationStatus }
+          : a
+      )
+    );
   };
 
   return (
@@ -58,14 +62,17 @@ const HistoryPage: React.FC = () => {
           </tr>
         </thead>
         <tbody>
-          {apps.map(app => (
+          {apps.map((app) => (
             <tr key={app.id}>
               <td>{app.job_title}</td>
               <td>{app.company_name}</td>
               <td>{app.status}</td>
               <td>
-                {app.status === ('pending_review' as ApplicationStatus) && (
-                  <button className="btn btn-primary btn-sm" onClick={() => handleReview(app)}>
+                {app.status === ("pending_review" as ApplicationStatus) && (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => handleReview(app)}
+                  >
                     Review
                   </button>
                 )}

@@ -13,7 +13,13 @@
 
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "composite": true
+    "composite": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
   },
   "include": [
     "electron/**/*.ts",

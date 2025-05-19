@@ -8,12 +8,17 @@ import { AuthGate } from "./components/AuthGate";
 import "./index.css"; // Ensure Tailwind/DaisyUI styles are imported
 import CaptchaModal from "./components/CaptchaModal";
 import { ActivityProvider } from "./contexts/ActivityContext"; // Import ActivityProvider
+import { JobScheduler } from "../agent/JobScheduler";
 
 function App() {
   const [activePage, setActivePage] = useState<PageName>("history");
   const [showCaptchaModal, setShowCaptchaModal] = useState(false);
 
   useEffect(() => {
+    // Start the JobScheduler
+    const scheduler = JobScheduler.getInstance();
+    scheduler.start();
+
     // Set up listener for captcha detection events from main process
     const handleCaptchaDetected = () => {
       console.log("LinkedIn checkpoint detected, showing CAPTCHA modal");
