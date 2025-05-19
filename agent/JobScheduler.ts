@@ -1,10 +1,10 @@
 import schedule from "node-schedule";
 import debug from "debug";
-import { supabase } from "../src/lib/supabaseClient.js";
-import { UserProfile, JobListing, Answer } from "../src/shared/types.js";
-import * as scanner from "./scanner.js";
-import * as ai from "./ai.js";
-import * as apply from "./apply.js";
+import { supabase } from "../src/lib/supabaseClient.ts";
+import { UserProfile, JobListing, Answer } from "../src/shared/types.ts";
+import * as scanner from "./scanner.ts";
+import * as ai from "./ai.ts";
+import * as apply from "./apply.ts";
 
 const log = debug("jobbot:scheduler");
 
@@ -39,13 +39,15 @@ export class JobScheduler {
     return JobScheduler._instance;
   }
 
-  private constructor() {}
+  private constructor() {
+    // Private constructor for singleton pattern
+  }
 
-  /** Auto-starts a cron that runs every 20 minutes. No-op if already started. */
+  /** Auto-starts a cron that runs every minute. No-op if already started. */
   start(): void {
     if (this.job) return; // already started
-    log("Starting scheduler with cron '*/20 * * * *'");
-    this.job = schedule.scheduleJob("*/20 * * * *", async () => {
+    log("Starting scheduler with cron '* * * * *'");
+    this.job = schedule.scheduleJob("* * * * *", async () => {
       await this.runCycle();
     });
   }
@@ -102,53 +104,99 @@ export class JobScheduler {
       await scanner.scanLinkedInJobs(user);
 
       // 2. Fetch up to 10 fresh postings that are marked as fresh in DB
-      const { data: freshJobs } = await (supabase as any)
-        .from("job_listings")
+      const { data: freshJobsToApply, error: fetchError } = await (
+        supabase as any
+      )
+        .from("job_applications")
         .select("*")
         .eq("status", "fresh")
+        .eq("user_id", user.user_id)
         .order("created_at", { ascending: false })
         .limit(10);
 
-      const jobs: JobListing[] = (freshJobs as any) || [];
+      if (fetchError) {
+        log(
+          "Error fetching fresh jobs from job_applications:",
+          fetchError.message
+        );
+        return;
+      }
 
-      for (const job of jobs) {
+      const jobsToProcess: any[] = (freshJobsToApply as any) || [];
+
+      log(
+        `Found ${jobsToProcess.length} fresh jobs in job_applications to process.`
+      );
+
+      for (const jobApp of jobsToProcess) {
         if (this.paused) break;
         if (this.appliedHour >= 25 || this.appliedDay >= 45) break;
+
+        const jobDataForAI: JobListing = {
+          id: jobApp.job_id,
+          title: jobApp.job_title,
+          company: jobApp.company_name,
+          description: jobApp.job_description || "",
+          url: jobApp.job_url || "",
+        };
 
         // --- Answer generation ---
         let answers: Answer[] = [];
         try {
-          answers = await ai.generateAnswers(user, job, []);
+          answers = await ai.generateAnswers(user, jobDataForAI, []);
         } catch (err) {
           log("Error generating answers", err);
           continue;
         }
 
-        const shouldMarkForReview = answers.some(a => a.needs_review);
+        const shouldMarkForReview = answers.some((a) => a.needs_review);
 
         if (shouldMarkForReview) {
-          // mark for review
-          log(`Job ${job.id} has answers needing review or low confidence. Marking as pending_review.`);
+          log(
+            `Job ${jobApp.job_id} has answers needing review or low confidence. Marking as pending_review.`
+          );
           await (supabase as any)
             .from("job_applications")
-            .insert({ user_id: user.id, job_id: job.id, status: "pending_review" });
+            .update({
+              status: "pending_review",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", jobApp.id);
           continue;
         }
 
         try {
           const result = await apply.applyToJob(
             user,
-            job,
+            jobDataForAI,
             answers,
             user.resume_path || ""
           );
           if (result === "submitted") {
             this.appliedHour += 1;
             this.appliedDay += 1;
-            log(`Application submitted. Hour ${this.appliedHour}/25, Day ${this.appliedDay}/45`);
+            log(
+              `Application submitted for job_app id ${jobApp.id}. Hour ${this.appliedHour}/25, Day ${this.appliedDay}/45`
+            );
+            await (supabase as any)
+              .from("job_applications")
+              .update({
+                status: "applied",
+                applied_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", jobApp.id);
           }
         } catch (err) {
-          log("Error applying to job", err);
+          log(`Error applying to job_app id ${jobApp.id}:`, err);
+          await (supabase as any)
+            .from("job_applications")
+            .update({
+              status: "error_applying",
+              reason: (err as Error).message,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", jobApp.id);
         }
 
         // 3. Random delay between applications
@@ -159,19 +207,58 @@ export class JobScheduler {
     }
   }
 
+  /** Manually triggers a run cycle. */
+  public async runCycleNow(): Promise<void> {
+    log("Manually triggering a run cycle.");
+    // The runCycle method itself checks for the paused state, caps, etc.
+    await this.runCycle();
+  }
+
   private async fetchCurrentUser(): Promise<UserProfile | null> {
     try {
       const {
         data: { user: authUser },
       } = await (supabase as any).auth.getUser();
-      if (!authUser) return null;
-      const { data } = await (supabase as any)
+      log("fetchCurrentUser - authUser object:", authUser);
+
+      if (!authUser) {
+        log(
+          "fetchCurrentUser - No authUser found from supabase.auth.getUser(). Returning null."
+        );
+        return null;
+      }
+
+      log(
+        `fetchCurrentUser - Attempting to fetch profile for authUser.id: ${authUser.id}`
+      );
+      const { data: profileData, error: profileError } = await (supabase as any)
         .from("profiles")
         .select("*")
-        .eq("id", authUser.id)
+        .eq("user_id", authUser.id) // Keep this as "id" for now, we will analyze based on logs
         .single();
-      return data as UserProfile;
-    } catch {
+
+      if (profileError) {
+        log("fetchCurrentUser - Error fetching profile:", profileError);
+        // Also check if the error means "No rows found" which .single() can treat as an error depending on configuration/usage
+        // For now, any error during profile fetch means we can't proceed with this user.
+        return null;
+      }
+
+      log("fetchCurrentUser - Profile data received:", profileData);
+
+      if (!profileData) {
+        log(
+          "fetchCurrentUser - Profile data is null/undefined after query (profile might not exist for user id). Returning null."
+        );
+        return null;
+      }
+
+      return profileData as UserProfile;
+    } catch (error) {
+      log(
+        "fetchCurrentUser - Caught an unexpected error in the try block:",
+        error
+      );
       return null;
     }
   }

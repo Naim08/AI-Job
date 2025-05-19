@@ -9,6 +9,7 @@
     "moduleResolution": "NodeNext",
     "target": "ESNext",
     "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
     "paths": {
       "*": ["node_modules/*", "src/*"]
     }

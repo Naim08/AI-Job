@@ -45,6 +45,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener("agent:captchaNeededGlobal", handler);
     };
   },
+  runAgentCycleNow: () => ipcRenderer.invoke("agent:runCycleNow"),
+  updateAuthSession: (session: { accessToken: string; refreshToken: string }) =>
+    ipcRenderer.invoke("electronAPI.updateAuthSession", session),
+  clearAuthSession: () => ipcRenderer.invoke("electronAPI.clearAuthSession"),
 } as const);
 
 console.log("[Preload Script] Executing preload script...");
