@@ -22,6 +22,21 @@ export interface IElectronAPI {
   retryOllama: () => void;
   applyQueued: (appId: string) => Promise<{ success: boolean; error?: string }>;
   onCaptchaNeeded: (callback: () => void) => () => void;
+  updateAuthSession: (session: {
+    accessToken: string;
+    refreshToken: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  clearAuthSession: () => Promise<{ success: boolean; error?: string }>;
+  shell: {
+    openExternal: (
+      url: string
+    ) => Promise<{ success: boolean; error?: string }>;
+  };
+  runAgentCycleNow: () => Promise<{
+    success: boolean;
+    status?: AgentStatus;
+    error?: string;
+  }>;
 }
 
 // Define AgentStatus interface if it's not already globally available or imported

@@ -1,5 +1,6 @@
 export interface UserProfile {
   readonly id: string;
+  user_id: string;
   name: string;
   email: string;
   avatar_url?: string | null;

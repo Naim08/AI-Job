@@ -9,14 +9,14 @@ import {
 import path from "node:path";
 import fs from "node:fs";
 import squirrelStartup from "electron-squirrel-startup"; // For Windows startup/shortcuts
-import { syncEmbeddings } from "../agent/embeddings.js";
-import { supabase } from "../src/lib/supabaseClient.js";
-import { UserProfile, UserProfileSettings } from "../src/shared/types.js"; // Added import for UserProfile and UserProfileSettings
-import type { Database, Tables } from "../src/shared/supabase.js"; // Import Supabase generated types
+import { syncEmbeddings } from "../agent/embeddings.ts";
+import { supabase } from "../src/lib/supabaseClient.ts";
+import { UserProfile, UserProfileSettings } from "../src/shared/types.ts"; // Added import for UserProfile and UserProfileSettings
+import type { Database, Tables } from "../src/shared/supabase.ts"; // Import Supabase generated types
 import dotenv from "dotenv";
 dotenv.config();
-import { JobScheduler } from "../agent/JobScheduler.js"; // Import JobScheduler
-import type { AgentStatus } from "../src/types/electron.js"; // Reverted to .js extension
+import { JobScheduler } from "../agent/JobScheduler.ts"; // Import JobScheduler
+import type { AgentStatus } from "../src/types/electron.ts"; // Reverted to .ts extension
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (squirrelStartup) {
@@ -141,6 +141,98 @@ app.whenReady().then(async () => {
   const scheduler = JobScheduler.getInstance();
   scheduler.start();
 
+  // Implement the updateAuthSession from IElectronAPI
+  ipcMain.handle(
+    "electronAPI.updateAuthSession",
+    async (
+      event,
+      sessionArgs: { accessToken: string; refreshToken: string }
+    ) => {
+      console.log(
+        "[Main Process] electronAPI.updateAuthSession invoked with sessionArgs:",
+        sessionArgs ? "Exists" : "Missing"
+      );
+      if (sessionArgs && sessionArgs.accessToken && sessionArgs.refreshToken) {
+        console.log(
+          "[Main Process] Attempting to set Supabase session in main process..."
+        );
+        const { error: setError } = await supabase.auth.setSession({
+          access_token: sessionArgs.accessToken,
+          refresh_token: sessionArgs.refreshToken,
+        });
+        if (setError) {
+          console.error(
+            "[Main Process] Error setting Supabase session via updateAuthSession:",
+            setError.message
+          );
+          return { success: false, error: setError.message };
+        }
+        console.log(
+          "[Main Process] Supabase session set successfully via updateAuthSession (no immediate error)."
+        );
+
+        // Immediately try to get user to see if setSession worked on this instance
+        const {
+          data: { user: mainProcessUser },
+          error: getUserError,
+        } = await supabase.auth.getUser();
+        if (getUserError) {
+          console.error(
+            "[Main Process] Error calling getUser() immediately after setSession:",
+            getUserError.message
+          );
+        }
+        console.log(
+          "[Main Process] User object immediately after setSession in IPC handler:",
+          mainProcessUser ? mainProcessUser.email : "null"
+        );
+
+        // Re-fetch/broadcast status after session is set
+        await initialStatusFetchAndBroadcast();
+        return { success: true };
+      } else {
+        console.warn(
+          "[Main Process] Invalid session data received for updateAuthSession. Access token or refresh token might be missing."
+        );
+        return {
+          success: false,
+          error: "Invalid session data: accessToken or refreshToken missing.",
+        };
+      }
+    }
+  );
+
+  ipcMain.handle("electronAPI.clearAuthSession", async () => {
+    // This is a placeholder, actual implementation would clear main process session state
+    // For Supabase, if you were storing the session details manually in main, you'd clear them.
+    // If setSession(null) effectively clears it, that's fine.
+    // supabase.auth.setSession({ access_token: null, refresh_token: null }) might error or not be standard.
+    // The most robust way if `setSession` with nulls isn't standard for clearing is to manage a local variable for the session in main.
+    // However, for now, let's assume that future calls to supabase.auth.getUser() will fail or return null
+    // after the client (renderer) has signed out and its session is invalid.
+    // If issues arise, a more explicit clearing mechanism in main for its supabase instance might be needed.
+    console.log(
+      "[Main Process] electronAPI.clearAuthSession invoked. Assuming client-side logout handles Supabase session invalidation for main process calls."
+    );
+    // Attempt to re-fetch/broadcast status as user is now null for the scheduler
+    await initialStatusFetchAndBroadcast();
+    return { success: true };
+  });
+
+  ipcMain.handle("agent:runCycleNow", async () => {
+    console.debug("[Main Process] IPC: agent:runCycleNow invoked.");
+    try {
+      await JobScheduler.getInstance().runCycleNow();
+      // Optionally, return the new status or a success indication
+      const status = await getAndUpdateAgentStatus();
+      broadcastAgentStatus(status); // Broadcast updated status
+      return { success: true, status };
+    } catch (error: any) {
+      console.error("[Main Process] Error during agent:runCycleNow:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Call initialStatusFetchAndBroadcast after scheduler is started and ready
   // Placed after JobScheduler.getInstance().start() or where appropriate
   // For example, if JobScheduler emits a 'ready' or 'started' event, listen to that.
@@ -153,7 +245,7 @@ app.whenReady().then(async () => {
 
   // OLLAMA IPC HANDLERS
   const { hasCli, listModels, installModel, uninstallModel } = await import(
-    "../agent/ollama.js"
+    "../agent/ollama.ts"
   );
   ipcMain.handle("ollama:has", async (): Promise<boolean> => {
     console.debug("[Main Process] IPC: ollama:has invoked.");
