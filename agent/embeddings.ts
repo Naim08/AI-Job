@@ -1,17 +1,17 @@
-import { UserProfile, FAQ } from "../src/shared/types.js";
-import { TablesInsert } from "../src/shared/supabase.js";
+import { UserProfile, FAQ } from "../src/shared/types.ts";
+import { TablesInsert } from "../src/shared/supabase.ts";
 import debug from "debug";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import { supabase } from "../src/lib/supabaseClient.js";
+import { supabase } from "../src/lib/supabaseClient.ts";
 import {
   extractTextFromPdfViaMultimodal,
   getEmbedding as getEmbeddingFromAI,
   extractCompanyNamesFromText,
-} from "../agent/ai.js";
+} from "../agent/ai.ts";
 
-const log = debug("jobot:embeddings");
+const log = debug("jobbot:embeddings");
 
 interface DbProfile {
   user_id: string;
@@ -471,6 +471,7 @@ async function runCli() {
   log(`CLI mode: User ID specified: ${userId}`);
   const user: UserProfile = {
     id: userId,
+    user_id: userId,
     name: "Test User CLI",
     email: "testcli@example.com",
   };

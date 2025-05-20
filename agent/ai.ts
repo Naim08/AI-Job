@@ -4,7 +4,7 @@ import {
   Answer,
   ResumeChunk,
   // FAQ, // FAQ type is used for the Supabase query result, but not directly for queryFaqChunks anymore
-} from "../src/shared/types.js";
+} from "../src/shared/types.ts";
 import { exec } from "child_process"; // For Ollama version check
 import util from "util";
 import fs from "fs"; // Added for reading PDF files
@@ -15,16 +15,13 @@ import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import OpenAI from "openai"; // Import the raw OpenAI SDK
 import path from "path"; // For path.basename
-import { Tables, TablesInsert } from "../src/shared/supabase.js"; // Corrected path, Added Tables
-import { supabase } from '../src/lib/supabaseClient.js'; // Import Supabase client
-
+import { Tables, TablesInsert } from "../src/shared/supabase.ts"; // Corrected path, Added Tables
+import { supabase } from "../src/lib/supabaseClient.ts"; // Import Supabase client
+import debug from "debug";
 dotenv.config();
 const execAsync = util.promisify(exec);
-const debug =
-  (namespace: string) =>
-  (...args: any[]) =>
-    console.log(`[${namespace}]`, ...args);
-const log = debug("jobot:ai");
+
+const log = debug("jobbot:ai");
 
 // --- AI Provider Configuration ---
 const AI_PROVIDER = process.env.AI_PROVIDER || "openai"; // Default to openai now
@@ -389,14 +386,18 @@ ${a}
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      log(`[rateAnswer] Ollama API error: ${response.status} ${response.statusText}`);
+      log(
+        `[rateAnswer] Ollama API error: ${response.status} ${response.statusText}`
+      );
       return 0.5; // Default on API error
     }
 
     const result = await response.json();
-    
-    if (!result || typeof result.response !== 'string') {
-      log('[rateAnswer] Invalid response structure from Ollama API, defaulting to 0.5');
+
+    if (!result || typeof result.response !== "string") {
+      log(
+        "[rateAnswer] Invalid response structure from Ollama API, defaulting to 0.5"
+      );
       return 0.5;
     }
 
@@ -404,15 +405,17 @@ ${a}
     const score = parseFloat(scoreText);
 
     if (isNaN(score)) {
-      log(`[rateAnswer] LLM response is not a number: "${scoreText}", defaulting to 0.5`);
+      log(
+        `[rateAnswer] LLM response is not a number: "${scoreText}", defaulting to 0.5`
+      );
       return 0.5;
     }
     return Math.max(0, Math.min(score, 1));
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      log('[rateAnswer] Ollama API call timed out');
+    if (error instanceof Error && error.name === "AbortError") {
+      log("[rateAnswer] Ollama API call timed out");
     } else {
-      log('[rateAnswer] Error calling Ollama API: ', error);
+      log("[rateAnswer] Error calling Ollama API: ", error);
     }
     return 0.5; // Default to 0.5 on any error (including timeout)
   }
@@ -432,18 +435,21 @@ export async function generateAnswers(
     const embeddingString = JSON.stringify(questionVector);
 
     const { data: faqMatches, error: faqError } = await supabase.rpc(
-      'match_faq_chunks', 
+      "match_faq_chunks",
       {
-        query_embedding: embeddingString, 
-        p_user_id: user.id, 
-        match_threshold: FAQ_SIM_THRESHOLD 
+        query_embedding: embeddingString,
+        p_user_id: user.id,
+        match_threshold: FAQ_SIM_THRESHOLD,
       }
     );
 
     if (faqError) {
-      log(`Error querying FAQ chunks for question "${question}":`, faqError.message);
+      log(
+        `Error querying FAQ chunks for question "${question}":`,
+        faqError.message
+      );
       allAnswers.push({
-        id: undefined, 
+        id: undefined,
         question,
         answer: "",
         refs: [],
@@ -452,27 +458,37 @@ export async function generateAnswers(
       });
       continue;
     }
-    
-    const bestMatch = faqMatches && faqMatches.length > 0 ? faqMatches[0] : null;
 
-    if (bestMatch && bestMatch.similarity && bestMatch.similarity >= FAQ_SIM_THRESHOLD && bestMatch.answer) {
-      log(`Found FAQ match for question "${question}" with similarity ${bestMatch.similarity}. Reusing FAQ answer.`);
+    const bestMatch =
+      faqMatches && faqMatches.length > 0 ? faqMatches[0] : null;
+
+    if (
+      bestMatch &&
+      bestMatch.similarity &&
+      bestMatch.similarity >= FAQ_SIM_THRESHOLD &&
+      bestMatch.answer
+    ) {
+      log(
+        `Found FAQ match for question "${question}" with similarity ${bestMatch.similarity}. Reusing FAQ answer.`
+      );
       const confidence = bestMatch.similarity;
       allAnswers.push({
         id: undefined,
         question,
-        answer: bestMatch.answer, 
-        refs: bestMatch.faq_id ? ['faq:' + bestMatch.faq_id] : [],
+        answer: bestMatch.answer,
+        refs: bestMatch.faq_id ? ["faq:" + bestMatch.faq_id] : [],
         confidence: confidence,
         needs_review: confidence < 0.65,
       });
     } else {
-      log(`No suitable FAQ match for question "${question}". Generating with LLM and rating.`);
+      log(
+        `No suitable FAQ match for question "${question}". Generating with LLM and rating.`
+      );
       // Placeholder for actual LLM-based answer generation if not from FAQ
       // For now, let's assume a generic answer is generated or was pre-filled if questions were from job description
       // This part needs to be adjusted if questions require on-the-fly generation based on job context only
       const generatedAnswerText = "Placeholder answer generated by LLM."; // Replace with actual LLM call if needed for answer generation itself
-      
+
       const confidence = await rateAnswer(question, generatedAnswerText);
       const needsReview = confidence < 0.65;
       // The needs_review flag is correctly set if rateAnswer returns 0.5 (default on error/timeout)
@@ -482,7 +498,7 @@ export async function generateAnswers(
       allAnswers.push({
         id: undefined,
         question,
-        answer: generatedAnswerText, 
+        answer: generatedAnswerText,
         refs: [],
         confidence: confidence,
         needs_review: needsReview,
@@ -501,14 +517,15 @@ export async function generateCoverLetter(
 ): Promise<{ text: string; pdfPath?: string }> {
   log(`[generateCoverLetter] Getting placeholder embeddings.`);
   const vec = Array(100).fill(0); // Placeholder for actual embedding vector if needed for context retrieval
-  
+
   log(`[generateCoverLetter] Querying resume chunks.`);
   const resChunks = await queryResumeChunks(user.id, vec);
   // FAQ fetching has been removed from here as queryFaqChunks was a placeholder and removed.
   // Cover letter will use a generic FAQ placeholder or rely on other context.
 
   const resumeText = resChunks.map((r: any) => r.content).join("\n - ");
-  const faqText = "Applicant is familiar with standard company policies and job expectations."; // Placeholder for FAQ text
+  const faqText =
+    "Applicant is familiar with standard company policies and job expectations."; // Placeholder for FAQ text
 
   const systemPrompt = `Wrap between COVER_LETTER_BEGINS_HERE and COVER_LETTER_ENDS_HERE. Max 2000 chars.`;
   const userPrompt = `Profile: ${user.name}, ${user.email}\nHighlights:\n - ${resumeText}\nCompany FAQ:\n${faqText}\nJob: ${job.title} at ${job.company}\nDescription: ${job.description}`;

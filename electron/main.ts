@@ -477,6 +477,7 @@ app.whenReady().then(async () => {
 
       const userToSync: UserProfile = {
         id: dbProfile.user_id,
+        user_id: dbProfile.user_id,
         name: dbProfile.full_name || "User",
         email: dbProfile.email || "N/A",
         resume_path: dbProfile.resume_path,

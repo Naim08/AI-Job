@@ -1,6 +1,6 @@
 import debug from "debug";
-import { supabase } from "../src/lib/supabaseClient.js";
-import { embedFaqEntry } from "./embeddings.js";
+import { supabase } from "../src/lib/supabaseClient.ts";
+import { embedFaqEntry } from "./embeddings.ts";
 
 const log = debug("jobbot:faq");
 

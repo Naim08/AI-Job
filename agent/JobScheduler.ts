@@ -101,7 +101,7 @@ export class JobScheduler {
       }
 
       // 1. Scan LinkedIn and store fresh postings in DB
-      await scanner.scanLinkedInJobs(user);
+      // await scanner.scanLinkedInJobs(user);
 
       // 2. Fetch up to 10 fresh postings that are marked as fresh in DB
       const { data: freshJobsToApply, error: fetchError } = await (
@@ -170,7 +170,9 @@ export class JobScheduler {
             user,
             jobDataForAI,
             answers,
-            user.resume_path || ""
+            user.resume_path || "",
+            "",
+            { dryRunStopBeforeSubmit: true }
           );
           if (result === "submitted") {
             this.appliedHour += 1;
