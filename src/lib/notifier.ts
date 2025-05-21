@@ -1,5 +1,5 @@
-import { supabase } from "./supabaseClient.js";
-import { JobApplication, ApplicationStatus } from "../shared/types.js";
+import { supabase } from "./supabaseClient.ts";
+import { JobApplication, ApplicationStatus } from "../shared/types.ts";
 
 const NOTIFICATION_DEBOUNCE_MS = 300; // Reduced debounce for faster UI updates for any change
 const debouncedNotifications = new Map<string, NodeJS.Timeout>();

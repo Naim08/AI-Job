@@ -8,7 +8,6 @@ import { AuthGate } from "./components/AuthGate";
 import "./index.css"; // Ensure Tailwind/DaisyUI styles are imported
 import CaptchaModal from "./components/CaptchaModal";
 import { ActivityProvider } from "./contexts/ActivityContext"; // Import ActivityProvider
-import { supabase } from "./lib/supabaseClient.ts"; // Changed to .ts
 
 function App() {
   const [activePage, setActivePage] = useState<PageName>("history");
@@ -22,95 +21,13 @@ function App() {
     };
     window.addEventListener("captcha-detected", handleCaptchaDetected);
 
-    // --- Supabase session synchronization ---
-    const sendSessionToMainViaAPI = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (session && window.electronAPI) {
-        console.log(
-          "[Renderer] Sending session to main process via electronAPI.updateAuthSession:",
-          {
-            accessToken: session.access_token,
-            refreshToken: session.refresh_token,
-          }
-        );
-        try {
-          const result = await window.electronAPI.updateAuthSession({
-            accessToken: session.access_token,
-            refreshToken: session.refresh_token,
-          });
-          if (result.success) {
-            console.log(
-              "[Renderer] Supabase session successfully set in main process via API."
-            );
-          } else {
-            console.error(
-              "[Renderer] Failed to set Supabase session in main process via API:",
-              result.error
-            );
-          }
-        } catch (error) {
-          console.error(
-            "[Renderer] Error calling electronAPI.updateAuthSession:",
-            error
-          );
-        }
-      } else if (!session) {
-        console.log("[Renderer] No active session to send to main process.");
-      } else if (!window.electronAPI) {
-        console.warn(
-          "[Renderer] window.electronAPI is not available. Ensure preload script is working."
-        );
-      }
-    };
-
-    sendSessionToMainViaAPI(); // Initial call on component mount
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        console.log("[Renderer] Auth state changed:", event);
-        if (
-          (event === "SIGNED_IN" ||
-            event === "TOKEN_REFRESHED" ||
-            event === "INITIAL_SESSION") &&
-          session
-        ) {
-          sendSessionToMainViaAPI();
-        } else if (event === "SIGNED_OUT") {
-          console.log(
-            "[Renderer] User signed out. Main process session might need clearing."
-          );
-          if (window.electronAPI?.clearAuthSession) {
-            window.electronAPI
-              .clearAuthSession()
-              .then((result) => {
-                if (result.success)
-                  console.log("[Renderer] Main process session cleared.");
-                else
-                  console.error(
-                    "[Renderer] Failed to clear main process session:",
-                    result.error
-                  );
-              })
-              .catch((error) =>
-                console.error(
-                  "[Renderer] Error calling clearAuthSession:",
-                  error
-                )
-              );
-          }
-        }
-      }
+    // Session management is now handled by AuthGate component
+    console.log(
+      "[Renderer] Session management is handled by AuthGate component"
     );
-    // --- End Supabase session synchronization ---
 
-    // Clean up captcha listener and auth listener
     return () => {
       window.removeEventListener("captcha-detected", handleCaptchaDetected);
-      if (authListener?.subscription) {
-        authListener.subscription.unsubscribe();
-      }
     };
   }, []);
 

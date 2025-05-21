@@ -31,8 +31,10 @@ export default defineConfig({
         // Playwright/Chromium-BiDi problematic modules
         "chromium-bidi/lib/cjs/bidiMapper/BidiMapper",
         "chromium-bidi/lib/cjs/cdp/CdpConnection",
-        // 'canvas',     // No longer needed
-        // 'pdfjs-dist'  // No longer needed
+        "canvas", // No longer needed
+        "pdfjs-dist", // No longer needed
+        "pdfjs-dist/legacy/build/pdf.js",
+        "pdfjs-dist/legacy/build/pdf.worker.js",
       ],
       plugins: [
         // commonjs plugin might still be needed for other CJS modules.
@@ -40,7 +42,10 @@ export default defineConfig({
         // and no other CJS modules cause issues, this could be removed entirely.
         // For now, keeping it general or empty if no specific rules are left.
         commonjs({
-          // No specific pdf-parse rules needed anymore.
+          dynamicRequireTargets: [
+            // Add paths that need dynamic requires
+            "node_modules/pdfjs-dist/**/*.js",
+          ],
           // You can add rules for other CJS dependencies here if necessary.
         }),
       ],

@@ -106,3 +106,8 @@ export async function uninstallModel(name: string): Promise<void> {
   await execa("ollama", ["rm", name]);
   debug("ollama", `Model uninstalled: ${name}`);
 }
+
+export async function hasModel(name: string): Promise<boolean> {
+  const models = await listModels();
+  return models.some((m) => m.name === name);
+}

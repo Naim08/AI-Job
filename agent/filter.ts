@@ -117,7 +117,7 @@ async function fetchSimilarResumeChunks(
 }
 
 // Cosine similarity function
-function cosineSimilarity(
+export function cosineSimilarity(
   vecA: ReadonlyArray<number>,
   vecB: ReadonlyArray<number>
 ): number {

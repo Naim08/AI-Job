@@ -10,14 +10,12 @@ import util from "util";
 import fs from "fs"; // Added for reading PDF files
 import { Ollama } from "ollama";
 import dotenv from "dotenv";
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import OpenAI from "openai"; // Import the raw OpenAI SDK
 import path from "path"; // For path.basename
-import { Tables, TablesInsert } from "../src/shared/supabase.ts"; // Corrected path, Added Tables
 import { supabase } from "../src/lib/supabaseClient.ts"; // Import Supabase client
 import debug from "debug";
+import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 dotenv.config();
 const execAsync = util.promisify(exec);
 
@@ -36,6 +34,7 @@ const OPENAI_MODEL_NAME = process.env.OPENAI_MODEL_NAME || "gpt-4o-mini";
 const OPENAI_EMBEDDING_MODEL_NAME =
   process.env.OPENAI_EMBEDDING_MODEL_NAME || "text-embedding-3-small";
 
+const premiumUser = process.env.PREMIUM_USER;
 log(`AI Provider: ${AI_PROVIDER}`);
 log(
   `OpenAI Model for general tasks (and PDF extraction): ${OPENAI_MODEL_NAME}`
@@ -78,7 +77,7 @@ if (AI_PROVIDER === "ollama") {
 
 async function ensureOllamaInstalled(): Promise<void> {
   // This function is only relevant if Ollama is a possible provider for some operations.
-  if (AI_PROVIDER !== "ollama" || !ollamaClient) return;
+  if (!ollamaClient) return;
   try {
     await ollamaClient.list();
     log("Ollama connection OK");
@@ -98,7 +97,7 @@ async function ensureOllamaInstalled(): Promise<void> {
 export async function getEmbedding(text: string): Promise<number[]> {
   if (AI_PROVIDER === "ollama") {
     await ensureOllamaInstalled();
-    if (!ollamaClient)
+    if (!ollamaClient || !premiumUser)
       throw new Error("Ollama client not initialized for getEmbedding.");
     const resp = await ollamaClient.embeddings({
       model: OLLAMA_EMBEDDING_MODEL,
@@ -107,7 +106,7 @@ export async function getEmbedding(text: string): Promise<number[]> {
     return resp.embedding;
   }
   // OpenAI provider path
-  if (!openAIEmbeddings)
+  if (!openAIEmbeddings && premiumUser)
     throw new Error("OpenAI Embeddings client not initialized.");
   const embedding = await openAIEmbeddings.embedQuery(text);
   return embedding;
@@ -147,7 +146,7 @@ async function callGenerativeModel(
   input: string | { role: string; content: any }[],
   base64Images?: string[]
 ): Promise<string> {
-  if (AI_PROVIDER === "ollama") {
+  if (AI_PROVIDER === "ollama" && !premiumUser) {
     await ensureOllamaInstalled();
     if (!ollamaClient)
       throw new Error("Ollama client not initialized for callGenerativeModel.");
@@ -190,7 +189,7 @@ async function callGenerativeModel(
       "OpenAI expects a non-empty messages array for ChatOpenAI."
     );
   }
-  if (!openAIChatModel)
+  if (!openAIChatModel && premiumUser)
     throw new Error("OpenAI ChatModel (LangChain) not initialized.");
   const resp = await openAIChatModel.invoke(input);
   const content =
@@ -204,77 +203,17 @@ export async function extractTextFromPdfViaMultimodal(
   filePath: string
 ): Promise<string | null> {
   log(
-    `[AI PDF Extract] Starting extraction for: ${filePath} using ${AI_PROVIDER}`
+    `[AI PDF Extract] Starting extraction for: ${filePath} using LangChain PDFLoader`
   );
+  try {
+    // const dataBuffer = fs.readFileSync(filePath);
 
-  if (AI_PROVIDER === "openai") {
-    if (!OPENAI_API_KEY)
-      throw new Error("OpenAI API key is required for PDF extraction.");
-    if (!openAIChatCompletionClient)
-      throw new Error("OpenAI raw client not initialized for PDF extraction.");
-
-    try {
-      log(`[AI PDF Extract OpenAI] Reading file: ${filePath}`);
-      const fileBuffer = fs.readFileSync(filePath);
-      const base64Pdf = fileBuffer.toString("base64");
-      const fileName = path.basename(filePath);
-      log(
-        `[AI PDF Extract OpenAI] PDF read and encoded. Filename: ${fileName}`
-      );
-
-      const promptText =
-        "Extract all text content from this PDF document. Preserve the structure, paragraphs, and line breaks as accurately as possible. Output only the extracted text.";
-
-      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: promptText },
-            {
-              type: "file",
-              // @ts-ignore
-              file: {
-                file_data: `data:application/pdf;base64,${base64Pdf}`,
-                filename: fileName,
-              },
-            },
-          ],
-        },
-      ];
-
-      log(
-        `[AI PDF Extract OpenAI] Sending request to model: ${OPENAI_MODEL_NAME}`
-      );
-      const response = await openAIChatCompletionClient.chat.completions.create(
-        {
-          model: OPENAI_MODEL_NAME,
-          messages: messages,
-          max_tokens: 4000,
-        }
-      );
-
-      const extractedText = response.choices[0]?.message?.content;
-      if (extractedText) {
-        log(
-          `[AI PDF Extract OpenAI] Successfully extracted text. Length: ${extractedText.length}`
-        );
-        return extractedText.trim();
-      } else {
-        log(
-          "[AI PDF Extract OpenAI] No text content found in response choice."
-        );
-        return null;
-      }
-    } catch (error: any) {
-      log(`[AI PDF Extract OpenAI] Error: ${error.message}`);
-      console.error("[AI PDF Extract OpenAI] Detailed Error:", error);
-      return null;
-    }
-  } else {
-    // If not OpenAI, PDF extraction is not supported by this function anymore.
-    log(
-      `[AI PDF Extract] PDF extraction is only supported with AI_PROVIDER='openai'. Current provider: '${AI_PROVIDER}'. Skipping PDF processing.`
-    );
+    const pdfloader = new PDFLoader(filePath);
+    const data = await pdfloader.load();
+    return data[0].pageContent;
+  } catch (error) {
+    log(`[AI PDF Extract] Error: ${error.message}`);
+    log("[AI PDF Extract] Detailed Error:", error);
     return null;
   }
 }
@@ -283,12 +222,6 @@ export async function extractCompanyNamesFromText(
   resumeText: string
 ): Promise<string[]> {
   log("[AI Company Extract] Attempting to extract company names from text.");
-  if (AI_PROVIDER !== "openai") {
-    log(
-      "[AI Company Extract] Company extraction is currently only supported with AI_PROVIDER='openai'. Skipping."
-    );
-    return [];
-  }
   if (!resumeText || resumeText.trim().length === 0) {
     log("[AI Company Extract] No resume text provided. Skipping.");
     return [];
@@ -353,72 +286,57 @@ export const FAQ_SIM_THRESHOLD = 0.8;
 
 // Helper function to rate answer quality using a local LLM
 async function rateAnswer(q: string, a: string): Promise<number> {
-  const prompt = `
-Return ONLY a number 0-1 with two decimals indicating how well the
-answer satisfies the question.
-
-### Question
-${q}
-
-### Answer
-${a}
-
-### Score:
+  const systemPrompt = `
+You are an expert job applicant.
+Your task is to rate the quality of the answer provided by the applicant.
+Return ONLY a number 0-1 with two decimals indicating how well the answer satisfies the question.
+`;
+  const userPrompt = `
+Question: ${q}
+Answer: ${a}
+Score:
 `;
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
-
-    const response = await fetch("http://localhost:11434/api/generate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "llama2", // As specified in the prompt for rateAnswer
-        prompt: prompt,
-        stream: false, // Crucial for non-streaming response
-      }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      log(
-        `[rateAnswer] Ollama API error: ${response.status} ${response.statusText}`
-      );
-      return 0.5; // Default on API error
-    }
-
-    const result = await response.json();
-
-    if (!result || typeof result.response !== "string") {
-      log(
-        "[rateAnswer] Invalid response structure from Ollama API, defaulting to 0.5"
-      );
-      return 0.5;
-    }
-
-    const scoreText = result.response.trim();
+    const modelInput = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ];
+    const rawResponse = await callGenerativeModel(modelInput);
+    const scoreText = rawResponse.trim();
     const score = parseFloat(scoreText);
-
-    if (isNaN(score)) {
-      log(
-        `[rateAnswer] LLM response is not a number: "${scoreText}", defaulting to 0.5`
-      );
-      return 0.5;
-    }
     return Math.max(0, Math.min(score, 1));
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      log("[rateAnswer] Ollama API call timed out");
-    } else {
-      log("[rateAnswer] Error calling Ollama API: ", error);
-    }
-    return 0.5; // Default to 0.5 on any error (including timeout)
+    log(`[rateAnswer] Error: ${error.message}`);
+    return 0.5; // Default to 0.5 on any error
   }
+}
+async function fetchResumeText(userId: string): Promise<string> {
+  // Try profiles.resume_text first
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("resume_text")
+    .eq("user_id", userId)
+    .single();
+  if (profileError) {
+    log(`Error fetching profile for resume_text: ${profileError.message}`);
+  }
+  if (profile && profile.resume_text && profile.resume_text.trim().length > 0) {
+    return profile.resume_text;
+  }
+  // Fallback: join resume_chunks
+  const { data: chunks, error: chunkError } = await supabase
+    .from("resume_chunks")
+    .select("resume_text_content")
+    .eq("user_id", userId);
+  if (chunkError) {
+    log(`Error fetching resume_chunks: ${chunkError.message}`);
+    return "";
+  }
+  if (chunks && chunks.length > 0) {
+    return chunks.map((c: any) => c.resume_text_content).join("\n");
+  }
+  return "";
 }
 
 export async function generateAnswers(
@@ -428,6 +346,12 @@ export async function generateAnswers(
 ): Promise<Answer[]> {
   log(`Generating answers for user ${user.id} and job "${job.title}"`);
   const allAnswers: Answer[] = [];
+
+  // Helper to fetch resume text (prefer profiles.resume_text, else join resume_chunks)
+  // Try profiles.resume_text first
+  // Fallback: join resume_chunks
+  // Pre-fetch resume text once for all questions (to avoid repeated DB calls)
+  let resumeText: string | null = null;
 
   for (const question of questions) {
     log(`Processing question: "${question}"`);
@@ -478,23 +402,37 @@ export async function generateAnswers(
         answer: bestMatch.answer,
         refs: bestMatch.faq_id ? ["faq:" + bestMatch.faq_id] : [],
         confidence: confidence,
-        needs_review: confidence < 0.65,
+        needs_review: confidence < 0.8,
       });
     } else {
       log(
-        `No suitable FAQ match for question "${question}". Generating with LLM and rating.`
+        `No suitable FAQ match for question "${question}". Generating with Ollama and rating.`
       );
-      // Placeholder for actual LLM-based answer generation if not from FAQ
-      // For now, let's assume a generic answer is generated or was pre-filled if questions were from job description
-      // This part needs to be adjusted if questions require on-the-fly generation based on job context only
-      const generatedAnswerText = "Placeholder answer generated by LLM."; // Replace with actual LLM call if needed for answer generation itself
-
-      const confidence = await rateAnswer(question, generatedAnswerText);
-      const needsReview = confidence < 0.65;
-      // The needs_review flag is correctly set if rateAnswer returns 0.5 (default on error/timeout)
-      // because 0.5 < 0.65 is true. The rule "on error default to 0.5 and set needs_review=true"
-      // is therefore handled.
-
+      // Fetch resume text if not already fetched
+      if (resumeText === null) {
+        resumeText = await fetchResumeText(user.id);
+      }
+      // Compose prompt for Ollama
+      const ollamaPrompt = `You are an expert job applicant. Using ONLY the information in the following resume, answer the question as if you are the applicant.\n\nRESUME:\n${resumeText}\n\nQUESTION:\n${question}\n\nANSWER:`;
+      let generatedAnswerText = "";
+      try {
+        generatedAnswerText = await callGenerativeModel(ollamaPrompt);
+      } catch (e: any) {
+        log(`[Ollama Answer Generation] Error: ${e.message}`);
+        generatedAnswerText = "";
+      }
+      // Rate the answer
+      let confidence = 0;
+      try {
+        confidence = await rateAnswer(question, generatedAnswerText);
+      } catch (e: any) {
+        log(`[Ollama Answer Rating] Error: ${e.message}`);
+        confidence = 0.5;
+      }
+      const needsReview = confidence < 0.8;
+      log(
+        `[Ollama Answer] Q: ${question} | A: ${generatedAnswerText} | Confidence: ${confidence}`
+      );
       allAnswers.push({
         id: undefined,
         question,

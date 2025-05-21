@@ -5,10 +5,10 @@ import {
   Answer,
   ApplicationStatus,
 } from "../src/shared/types.ts";
-import { ensureSession, isCheckpoint } from "./session.ts";
+import { isCheckpoint } from "./session.ts";
 import { supabase } from "../src/lib/supabaseClient.ts";
 import debug from "debug";
-
+import { upsertFaq } from "./faq.ts";
 const GLOBAL_APPLICATION_TIMEOUT = 45000; // 45 seconds
 const SHORT_DELAY_MIN = 50;
 const SHORT_DELAY_MAX = 200;
@@ -43,20 +43,35 @@ export function normalizeQuestionText(text: string): string {
   return normalized.trim();
 }
 
+function normalizeQ(q: string) {
+  return normalizeQuestionText(q).toLowerCase();
+}
+
 export async function applyToJob(
   user: UserProfile,
   job: JobListing,
   answers: Answer[],
   resumePath: string,
   coverLetterPath?: string,
+  context?: BrowserContext,
   options?: { dryRunStopBeforeSubmit?: boolean }
-): Promise<"submitted" | "error" | "dry_run_complete"> {
+): Promise<ApplicationStatus> {
   log(
     `Starting application for job: ${job.title} (${job.id}) for user ${user.id}`
   );
-  let context: BrowserContext | null = null;
   let page: Page | null = null;
-  let applicationOutcome: "submitted" | "error" | "dry_run_complete" = "error";
+  let applicationOutcome:
+    | "submitted"
+    | "error"
+    | "dry_run_complete"
+    | "not_applied"
+    | "applied"
+    | "interviewing"
+    | "offer"
+    | "rejected"
+    | "ghosted"
+    | "error_navigating"
+    | "pending_review";
   let errorMessage: string | null = null;
   let supabaseStatus: ApplicationStatus = "error"; // Default to error for DB
 
@@ -66,12 +81,6 @@ export async function applyToJob(
 
   try {
     const operationPromise = (async () => {
-      context = await ensureSession();
-      if (!context) {
-        errorMessage = "Failed to ensure Playwright session.";
-        log(errorMessage);
-        return "error_early_exit";
-      }
       page = await context.newPage();
       try {
         await page.goto(job.url, {
@@ -145,8 +154,9 @@ export async function applyToJob(
       }
       // --- End cover letter field check ---
 
-      let currentStep = 0;
       const MAX_STEPS = 10;
+
+      let currentStep = 0;
 
       while (currentStep < MAX_STEPS) {
         log(`Processing step ${currentStep + 1}`);
@@ -164,15 +174,143 @@ export async function applyToJob(
         }
 
         const labels = await modalDialog.locator("label").all();
+        log(`Found ${labels.length} labels on this step.`);
+
+        const existingAnswerQuestions = new Set(
+          answers.map((a) => normalizeQ(a.question))
+        );
+        const stepUnansweredQuestions: string[] = [];
         for (const labelLocator of labels) {
           const rawLabelText = (await labelLocator.textContent()) || "";
-          log(`Label found: "${rawLabelText}"`);
+          const normalizedLabelText = normalizeQuestionText(rawLabelText);
+          if (
+            !normalizedLabelText ||
+            normalizedLabelText.toLowerCase().startsWith("deselect resume") ||
+            normalizedLabelText.toLowerCase().startsWith("change resume")
+          ) {
+            continue;
+          }
+          // Attempt to find associated input/select/textarea directly
+          let associatedInput = labelLocator
+            .locator(
+              "xpath=following-sibling::input | following-sibling::textarea | following-sibling::select"
+            )
+            .first();
+          if (!(await associatedInput.isVisible({ timeout: 500 }))) {
+            const forAttr = await labelLocator.getAttribute("for");
+            if (forAttr) {
+              associatedInput = modalDialog
+                .locator(`[id="${forAttr}"]`)
+                .first();
+            }
+          }
+          let actualQuestionText = normalizedLabelText;
+          let isChoiceGroup = false;
+          if (!(await associatedInput.isVisible({ timeout: 500 }))) {
+            // Potential choice group or complex structure. Try to find fieldset/legend.
+            const fieldset = labelLocator.locator("xpath=ancestor::fieldset");
+            if (await fieldset.isVisible({ timeout: 500 })) {
+              const legend = fieldset.locator("legend").first();
+              if (await legend.isVisible({ timeout: 500 })) {
+                const legendText = (await legend.textContent()) || "";
+                if (legendText) {
+                  actualQuestionText = normalizeQuestionText(legendText);
+                  isChoiceGroup = true;
+                }
+              }
+            }
+          }
+          // Only add unique, required, not-answered, and not-prefilled questions for this step
+          let isRequired = false;
+          let isPrefilled = false;
+          if (await associatedInput.isVisible({ timeout: 500 })) {
+            isRequired =
+              (await associatedInput.getAttribute("aria-required")) ===
+                "true" ||
+              (await associatedInput.getAttribute("required")) !== null;
+            const currentValue = await associatedInput.inputValue();
+
+            // Check for common placeholder values that should NOT count as pre-filled
+            const placeholderValues = [
+              "Select an option",
+              "Choose an option",
+              "Please select",
+              "--Select--",
+            ];
+            const isPlaceholder = placeholderValues.some(
+              (ph) => currentValue.trim().toLowerCase() === ph.toLowerCase()
+            );
+
+            isPrefilled =
+              !!currentValue && currentValue.trim() !== "" && !isPlaceholder;
+          }
+          if (
+            actualQuestionText &&
+            !existingAnswerQuestions.has(normalizeQ(actualQuestionText)) &&
+            !stepUnansweredQuestions.includes(actualQuestionText) &&
+            isRequired &&
+            !isPrefilled
+          ) {
+            stepUnansweredQuestions.push(actualQuestionText);
+          }
+        }
+        // If there are unanswered questions for this step, generate answers now
+        let generatedAnswers: typeof answers = [];
+        if (stepUnansweredQuestions.length > 0) {
+          log(
+            `Step ${currentStep + 1} unanswered questions: ${JSON.stringify(
+              stepUnansweredQuestions
+            )}`
+          );
+          const ai = await import("./ai.ts");
+          generatedAnswers = await ai.generateAnswers(
+            user,
+            job,
+            stepUnansweredQuestions
+          );
+          // Merge generated answers into answers array
+          answers = [
+            ...answers,
+            ...generatedAnswers.filter(
+              (ga) => !existingAnswerQuestions.has(normalizeQ(ga.question))
+            ),
+          ];
         }
 
-        const legends = await modalDialog.locator("legend").all();
-        for (const legendLocator of legends) {
-          const legendText = (await legendLocator.textContent()) || "";
-          log(`Legend found: "${legendText}"`);
+        // Check for any low-confidence answers and handle DB update/exit if needed
+        const CONFIDENCE_THRESHOLD = 0.8;
+        const lowConfidenceAnswers = generatedAnswers.filter(
+          (a) =>
+            (typeof a.confidence === "number" ? a.confidence : 0) <
+            CONFIDENCE_THRESHOLD
+        );
+        if (lowConfidenceAnswers.length > 0) {
+          log(
+            `Low-confidence answers detected. Saving to DB and marking job as pending_review.`
+          );
+          // Save each low-confidence answer to application_answers
+          for (const ans of lowConfidenceAnswers) {
+            await supabase.from("application_answers").upsert({
+              application_id: job.id,
+              question: ans.question,
+              answer: ans.answer,
+              confidence: ans.confidence,
+              needs_review: true,
+            });
+          }
+          // Update job application status to pending_review
+          await supabase
+            .from("job_applications")
+            .update({
+              status: "pending_review",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", job.id);
+          log(`Job ${job.id} set to pending_review. Moving to next job.`);
+          // Set these variables to be used by the finally block
+          applicationOutcome = "submitted";
+          supabaseStatus = "pending_review";
+          return "success_exit";
         }
 
         for (const labelLocator of labels) {
@@ -313,9 +451,27 @@ export async function applyToJob(
                   `Optional field "${actualQuestionText}" has no configured answer. Skipping.`
                 );
               } else if (currentValue && currentValue.trim() !== "") {
+                // Check for placeholder values in select elements
+                const placeholderValues = [
+                  "Select an option",
+                  "Choose an option",
+                  "Please select",
+                  "--Select--",
+                ];
+                const isPlaceholder = placeholderValues.some(
+                  (ph) => currentValue.trim().toLowerCase() === ph.toLowerCase()
+                );
+
+                if (isPlaceholder) {
+                  errorMessage = `Required field "${actualQuestionText}" has placeholder "${currentValue}" which is not a valid selection.`;
+                  log(errorMessage);
+                  return "error_exit";
+                }
+
                 log(
                   `Required field "${actualQuestionText}" has no configured answer but is pre-filled with "${currentValue}". Assuming OK.`
                 );
+                // add quest and value to faqs
               } else {
                 errorMessage = `Required field "${actualQuestionText}" has no configured answer and is not pre-filled.`;
                 log(errorMessage);
@@ -835,8 +991,11 @@ export async function applyToJob(
       applicationOutcome = "dry_run_complete";
       supabaseStatus = "not_applied";
     } else if (result === "success_exit") {
-      applicationOutcome = "submitted";
-      supabaseStatus = "applied";
+      // Don't override supabaseStatus here if it's already set to pending_review
+      if ((supabaseStatus as ApplicationStatus) !== "pending_review") {
+        applicationOutcome = "submitted";
+        supabaseStatus = "applied";
+      }
     }
     // 'no_action_exit' should ideally not occur. If it does, it implies a logic flaw.
     // It will default to 'error' or whatever applicationOutcome was last set to.
@@ -869,11 +1028,14 @@ export async function applyToJob(
       if (supabaseStatus === "applied") {
         updateData.applied_at = new Date().toISOString();
       }
+      log(
+        `Updating Supabase job_applications table for job ${job.id} and user ${user.user_id}`
+      );
 
       const { error: dbError } = await supabase
         .from("job_applications")
         .update(updateData)
-        .match({ job_id: job.id, user_id: user.id });
+        .match({ job_id: job.id, user_id: user.user_id });
 
       if (dbError) {
         log(`Error updating Supabase job_applications table: ${dbError}`);
@@ -908,5 +1070,5 @@ export async function applyToJob(
     //   }
     // }
   }
-  return applicationOutcome;
+  return supabaseStatus;
 }

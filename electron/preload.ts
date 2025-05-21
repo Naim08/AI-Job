@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   openCaptcha: () => ipcRenderer.invoke("app:openCaptcha"),
   notify: (msg: string) => ipcRenderer.invoke("app:notify", msg),
-  chooseFile: () => ipcRenderer.invoke("dialog:chooseFile"),
+  chooseFile: () => ipcRenderer.invoke("app:chooseFile"),
   openFile: (filePath: string) => ipcRenderer.invoke("app:openFile", filePath),
   triggerSyncEmbeddings: (userId: string) =>
     ipcRenderer.invoke("supabase:triggerSyncEmbeddings", userId),

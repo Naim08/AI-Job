@@ -67,7 +67,8 @@ export type ApplicationStatus =
   | "error"
   | "error_navigating"
   | "dry_run_complete"
-  | "submitted";
+  | "submitted"
+  | "pending_review";
 
 export interface DecisionNode {
   readonly title: string;
