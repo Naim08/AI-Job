@@ -2,16 +2,19 @@ import React, { useState, useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import AppLayout, { PageName } from "./components/AppLayout";
 import HistoryPage from "./pages/HistoryPage";
+import EnhancedHistoryPage from "./pages/EnhancedHistoryPage";
 import ActivityPage from "./pages/ActivityPage";
 import SettingsPage from "./pages/SettingsPage";
+import DashboardPage from "./pages/DashboardPage";
 import { AuthGate } from "./components/AuthGate";
 import "./index.css"; // Ensure Tailwind/DaisyUI styles are imported
 import CaptchaModal from "./components/CaptchaModal";
 import { ActivityProvider } from "./contexts/ActivityContext"; // Import ActivityProvider
 
 function App() {
-  const [activePage, setActivePage] = useState<PageName>("history");
+  const [activePage, setActivePage] = useState<PageName>("dashboard");
   const [showCaptchaModal, setShowCaptchaModal] = useState(false);
+  const [useEnhancedHistory, setUseEnhancedHistory] = useState(true);
 
   useEffect(() => {
     // Set up listener for captcha detection events from main process
@@ -33,8 +36,10 @@ function App() {
 
   const renderPage = () => {
     switch (activePage) {
+      case "dashboard":
+        return <DashboardPage />;
       case "history":
-        return <HistoryPage />;
+        return useEnhancedHistory ? <EnhancedHistoryPage /> : <HistoryPage />;
       case "activity":
         return <ActivityPage />;
       case "settings":

@@ -4,11 +4,12 @@ import {
   History,
   Settings as SettingsIcon,
   LogOut,
+  LayoutDashboard,
 } from "lucide-react";
 import { User } from "@supabase/supabase-js";
 import ApplyToggle from "./ApplyToggle";
 
-export type PageName = "history" | "activity" | "settings";
+export type PageName = "dashboard" | "history" | "activity" | "settings";
 
 export interface AppLayoutProps {
   activePage: PageName;
@@ -19,6 +20,7 @@ export interface AppLayoutProps {
 }
 
 const pageTitles: Record<PageName, string> = {
+  dashboard: "Dashboard",
   history: "History",
   activity: "Activity Log",
   settings: "Settings",
@@ -33,6 +35,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 }) => {
   const menuItems = (
     <>
+      <li>
+        <a
+          onClick={() => onPageChange("dashboard")}
+          className={activePage === "dashboard" ? "active" : ""}
+        >
+          <LayoutDashboard size={18} /> Dashboard
+        </a>
+      </li>
       <li>
         <a
           onClick={() => onPageChange("history")}

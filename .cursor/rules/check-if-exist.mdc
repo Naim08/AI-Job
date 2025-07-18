@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Think of this rule as your built-in “duplication alarm.” It shines brightest whenever the work at hand risks reinventing the wheel, racking up tech-debt, or burning precious sprint cycles on something that’s already battle-tested. 
