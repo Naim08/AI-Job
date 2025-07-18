@@ -1,11 +1,11 @@
 /// <reference types="vite/client" />
 
-import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
-import { Database } from '../shared/supabase.js';
-import dotenv from 'dotenv';
+import { createClient, User } from "@supabase/supabase-js";
+import { Database } from "../shared/supabase.ts";
+import dotenv from "dotenv";
 
 // Determine if we are in a Node.js-like environment (e.g., Electron main process)
-const isNodeEnvironment = typeof import.meta.env === 'undefined';
+const isNodeEnvironment = typeof import.meta.env === "undefined";
 
 // If in a Node.js environment, load .env variables.
 // This assumes that if this module is imported in the main process,
@@ -34,10 +34,14 @@ if (isNodeEnvironment) {
   const serviceKeyFromEnv = process.env.SUPABASE_SERVICE_KEY;
   if (serviceKeyFromEnv) {
     finalSupabaseKey = serviceKeyFromEnv;
-    console.log('[SupabaseClient] Initializing with SERVICE ROLE KEY for Node.js environment.');
+    console.log(
+      "[SupabaseClient] Initializing with SERVICE ROLE KEY for Node.js environment."
+    );
   } else {
     finalSupabaseKey = supabaseAnonKey; // Fallback to anon key if service key isn't set
-    console.warn('[SupabaseClient] WARNING: Node.js environment AND SUPABASE_SERVICE_KEY not found. Initializing with VITE_SUPABASE_ANON_KEY. RLS will apply.');
+    console.warn(
+      "[SupabaseClient] WARNING: Node.js environment AND SUPABASE_SERVICE_KEY not found. Initializing with VITE_SUPABASE_ANON_KEY. RLS will apply."
+    );
   }
 } else {
   // In Vite/renderer environment, always use anon key
@@ -55,8 +59,10 @@ if (!supabaseUrl) {
 if (!finalSupabaseKey) {
   let keyMissingMessage = "Supabase Key must be provided. ";
   if (isNodeEnvironment) {
-    keyMissingMessage += "(Ensure VITE_SUPABASE_ANON_KEY or SUPABASE_SERVICE_KEY is in .env for Node.js)";
-  } else { // Vite
+    keyMissingMessage +=
+      "(Ensure VITE_SUPABASE_ANON_KEY or SUPABASE_SERVICE_KEY is in .env for Node.js)";
+  } else {
+    // Vite
     keyMissingMessage += "(Ensure VITE_SUPABASE_ANON_KEY is in .env for Vite)";
   }
   throw new Error(keyMissingMessage);
@@ -76,4 +82,4 @@ export async function getUser(): Promise<User | null> {
 }
 
 // The SupabaseClient type can also be more specific if needed, though often inferred
-// export const supabase: SupabaseClient<Database> = createClient<Database>(supabaseUrl, supabaseAnonKey); 
+// export const supabase: SupabaseClient<Database> = createClient<Database>(supabaseUrl, supabaseAnonKey);

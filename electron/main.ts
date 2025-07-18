@@ -211,12 +211,30 @@ app.whenReady().then(async () => {
     // However, for now, let's assume that future calls to supabase.auth.getUser() will fail or return null
     // after the client (renderer) has signed out and its session is invalid.
     // If issues arise, a more explicit clearing mechanism in main for its supabase instance might be needed.
-    console.log(
-      "[Main Process] electronAPI.clearAuthSession invoked. Assuming client-side logout handles Supabase session invalidation for main process calls."
-    );
-    // Attempt to re-fetch/broadcast status as user is now null for the scheduler
-    await initialStatusFetchAndBroadcast();
-    return { success: true };
+    try {
+      // Clear the Supabase session in the main process
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error(
+          "[Main Process] Error clearing Supabase session:",
+          error.message
+        );
+        return { success: false, error: error.message };
+      }
+      console.log("[Main Process] Supabase session cleared successfully.");
+      // Attempt to re-fetch/broadcast status as user is now null for the scheduler
+      await initialStatusFetchAndBroadcast();
+      return { success: true };
+    } catch (clearError: any) {
+      console.error(
+        "[Main Process] Exception during session clearing:",
+        clearError.message
+      );
+
+      // Attempt to re-fetch/broadcast status as user is now null for the scheduler
+      await initialStatusFetchAndBroadcast();
+      return { success: false, error: clearError.message };
+    }
   });
 
   ipcMain.handle("agent:runCycleNow", async () => {
@@ -308,9 +326,9 @@ app.whenReady().then(async () => {
     return status;
   });
 
-  ipcMain.handle("open-captcha", async () => {
+  ipcMain.handle("app:openCaptcha", async () => {
     console.debug(
-      "[Main Process] IPC: open-captcha invoked. Opening https://www.linkedin.com"
+      "[Main Process] IPC: app:openCaptcha invoked. Opening https://www.linkedin.com"
     );
     try {
       await shell.openExternal("https://www.linkedin.com");
@@ -340,13 +358,13 @@ app.whenReady().then(async () => {
       };
     }
     new Notification({
-      title: "Jobot Notification", // App-specific title
+      title: "Jobbot Notification", // App-specific title
       body: message,
     }).show();
     return { success: true };
   });
 
-  ipcMain.handle("choose-file", async () => {
+  ipcMain.handle("app:chooseFile", async () => {
     if (!mainWindow) {
       console.error(
         "[Main Process] Cannot choose file because mainWindow is not available."
@@ -391,7 +409,7 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle("open-file", async (_event, filePath: string) => {
+  ipcMain.handle("app:openFile", async (_event, filePath: string) => {
     console.debug(
       `[Main Process] IPC: open-file invoked for path: "${filePath}"`
     );
@@ -425,101 +443,105 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle("trigger-sync-embeddings", async (_event, userId: string) => {
-    console.debug(
-      `[Main Process] IPC: trigger-sync-embeddings invoked for user ID: ${userId}`
-    );
-    if (!userId) {
-      console.error(
-        "[Main Process] User ID is required to trigger sync embeddings."
+  ipcMain.handle(
+    "supabase:triggerSyncEmbeddings",
+    async (_event, userId: string) => {
+      console.debug(
+        `[Main Process] IPC: supabase:triggerSyncEmbeddings invoked for user ID: ${userId}`
       );
-      return { success: false, error: "User ID not provided." };
-    }
-    try {
-      console.log(
-        `[Main Process] Attempting to fetch profile for user ${userId} (LOGGING_VERSION_CHECK_V2)`
-      );
-      const { data: dbProfile, error: profileError } = await supabase
-        .from("profiles")
-        .select(
-          "user_id, full_name, email, resume_path, settings, created_at, updated_at, avatar_url"
-        )
-        .eq("user_id", userId)
-        .single<Tables<"profiles">>();
-
-      if (
-        profileError &&
-        profileError.message !==
-          "JSON object requested, multiple (or no) rows returned"
-      ) {
+      if (!userId) {
         console.error(
-          `[Main Process] Supabase error fetching profile for user ${userId} (LOGGING_VERSION_CHECK_V2):`,
-          profileError.message,
-          profileError.code
+          "[Main Process] User ID is required to trigger sync embeddings."
         );
-        throw profileError;
+        return { success: false, error: "User ID not provided." };
       }
+      try {
+        console.log(
+          `[Main Process] Attempting to fetch profile for user ${userId} (LOGGING_VERSION_CHECK_V2)`
+        );
+        const { data: dbProfile, error: profileError } = await supabase
+          .from("profiles")
+          .select(
+            "user_id, full_name, email, resume_path, settings, created_at, updated_at, avatar_url"
+          )
+          .eq("user_id", userId)
+          .single<Tables<"profiles">>();
 
-      if (!dbProfile) {
+        if (
+          profileError &&
+          profileError.message !==
+            "JSON object requested, multiple (or no) rows returned"
+        ) {
+          console.error(
+            `[Main Process] Supabase error fetching profile for user ${userId} (LOGGING_VERSION_CHECK_V2):`,
+            profileError.message,
+            profileError.code
+          );
+          throw profileError;
+        }
+
+        if (!dbProfile) {
+          console.error(
+            `[Main Process] LOG_POINT_A_V2: dbProfile is null or undefined for user ${userId}. Preparing to throw ProfileNotFound. profileError: ${
+              profileError ? profileError.message : "N/A"
+            }`
+          );
+          throw new Error(`Profile not found for user ${userId}.`);
+        }
+
+        console.log(
+          `[Main Process] LOG_POINT_B_V2: dbProfile is supposedly valid for user ${userId}. Value: ${JSON.stringify(
+            dbProfile
+          )}`
+        );
+
+        const userToSync: UserProfile = {
+          id: dbProfile.user_id,
+          user_id: dbProfile.user_id,
+          name: dbProfile.full_name || "User",
+          email: dbProfile.email || "N/A",
+          resume_path: dbProfile.resume_path,
+          settings:
+            dbProfile.settings &&
+            typeof dbProfile.settings === "object" &&
+            !Array.isArray(dbProfile.settings)
+              ? (dbProfile.settings as UserProfileSettings)
+              : null,
+          created_at: dbProfile.created_at,
+          updated_at: dbProfile.updated_at,
+          avatar_url: dbProfile.avatar_url,
+        };
+
+        console.log(
+          `[Main Process] LOG_POINT_C_V2: UserToSync object created for user ${userId}: ${JSON.stringify(
+            userToSync
+          )}`
+        );
+        await syncEmbeddings(userToSync);
+        console.log(
+          `[Main Process] syncEmbeddings completed for user ${userId} (LOGGING_VERSION_CHECK_V2).`
+        );
+        return { success: true };
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         console.error(
-          `[Main Process] LOG_POINT_A_V2: dbProfile is null or undefined for user ${userId}. Preparing to throw ProfileNotFound. profileError: ${
-            profileError ? profileError.message : "N/A"
-          }`
+          `[Main Process] Error in supabase:triggerSyncEmbeddings catch block for user ${userId} (LOGGING_VERSION_CHECK_V2):`,
+          errorMessage
         );
-        throw new Error(`Profile not found for user ${userId}.`);
+        if (error instanceof Error && error.stack) {
+          console.error(error.stack);
+        }
+        return {
+          success: false,
+          error: `Embedding sync failed: ${errorMessage}`,
+        };
       }
-
-      console.log(
-        `[Main Process] LOG_POINT_B_V2: dbProfile is supposedly valid for user ${userId}. Value: ${JSON.stringify(
-          dbProfile
-        )}`
-      );
-
-      const userToSync: UserProfile = {
-        id: dbProfile.user_id,
-        name: dbProfile.full_name || "User",
-        email: dbProfile.email || "N/A",
-        resume_path: dbProfile.resume_path,
-        settings:
-          dbProfile.settings &&
-          typeof dbProfile.settings === "object" &&
-          !Array.isArray(dbProfile.settings)
-            ? (dbProfile.settings as UserProfileSettings)
-            : null,
-        created_at: dbProfile.created_at,
-        updated_at: dbProfile.updated_at,
-        avatar_url: dbProfile.avatar_url,
-      };
-
-      console.log(
-        `[Main Process] LOG_POINT_C_V2: UserToSync object created for user ${userId}: ${JSON.stringify(
-          userToSync
-        )}`
-      );
-      await syncEmbeddings(userToSync);
-      console.log(
-        `[Main Process] syncEmbeddings completed for user ${userId} (LOGGING_VERSION_CHECK_V2).`
-      );
-      return { success: true };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.error(
-        `[Main Process] Error in trigger-sync-embeddings catch block for user ${userId} (LOGGING_VERSION_CHECK_V2):`,
-        errorMessage
-      );
-      if (error instanceof Error && error.stack) {
-        console.error(error.stack);
-      }
-      return {
-        success: false,
-        error: `Embedding sync failed: ${errorMessage}`,
-      };
     }
-  });
+  );
 
-  ipcMain.handle("apply-queued", async (_event, appId: string) => {
-    console.log(`[Main Process] IPC: apply-queued for appId ${appId}`);
+  ipcMain.handle("job:applyQueued", async (_event, appId: string) => {
+    console.log(`[Main Process] IPC: job:applyQueuedd for appId ${appId}`);
     let jobApplication: Tables<"job_applications"> | null = null;
 
     try {

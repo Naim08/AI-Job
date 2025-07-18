@@ -13,7 +13,6 @@ export interface UserProfile {
 export interface UserProfileSettings {
   jobSearchSettings?: Array<string> | null;
   jobSearchLocation?: Array<string> | null;
-  // ... existing code ...
   active_model?: string;
 }
 
@@ -66,8 +65,10 @@ export type ApplicationStatus =
   | "rejected"
   | "ghosted"
   | "error"
+  | "error_navigating"
   | "dry_run_complete"
-  | "submitted";
+  | "submitted"
+  | "pending_review";
 
 export interface DecisionNode {
   readonly title: string;

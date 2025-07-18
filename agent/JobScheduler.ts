@@ -5,6 +5,9 @@ import { UserProfile, JobListing, Answer } from "../src/shared/types.ts";
 import * as scanner from "./scanner.ts";
 import * as ai from "./ai.ts";
 import * as apply from "./apply.ts";
+import * as ollama from "./ollama.ts";
+import { ensureSession } from "./session.ts";
+import { BrowserContext, Page } from "playwright";
 
 const log = debug("jobbot:scheduler");
 
@@ -18,7 +21,7 @@ export interface SchedulerStatus {
   appliedHour: number;
   appliedDay: number;
 }
-
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:latest";
 /**
  * JobScheduler – runs every 20 minutes, enforcing hourly and daily caps
  * and exposing pause/resume controls.
@@ -45,6 +48,12 @@ export class JobScheduler {
 
   /** Auto-starts a cron that runs every minute. No-op if already started. */
   start(): void {
+    // Check if the model is installed, if not installed, force the user to the model panel tsx (src/components/ModelPanel.tsx)
+    if (!ollama.hasModel(OLLAMA_MODEL)) {
+      log("Model not installed, forcing user to model panel");
+      return;
+    }
+
     if (this.job) return; // already started
     log("Starting scheduler with cron '* * * * *'");
     this.job = schedule.scheduleJob("* * * * *", async () => {
@@ -101,7 +110,15 @@ export class JobScheduler {
       }
 
       // 1. Scan LinkedIn and store fresh postings in DB
-      await scanner.scanLinkedInJobs(user);
+      // await scanner.scanLinkedInJobs(user);
+
+      //open browser
+      let context: BrowserContext | null = null;
+      context = await ensureSession();
+      if (!context) {
+        log("Failed to ensure Playwright session.");
+        return;
+      }
 
       // 2. Fetch up to 10 fresh postings that are marked as fresh in DB
       const { data: freshJobsToApply, error: fetchError } = await (
@@ -170,7 +187,10 @@ export class JobScheduler {
             user,
             jobDataForAI,
             answers,
-            user.resume_path || ""
+            user.resume_path || "",
+            "",
+            context,
+            { dryRunStopBeforeSubmit: true }
           );
           if (result === "submitted") {
             this.appliedHour += 1;
@@ -178,25 +198,13 @@ export class JobScheduler {
             log(
               `Application submitted for job_app id ${jobApp.id}. Hour ${this.appliedHour}/25, Day ${this.appliedDay}/45`
             );
-            await (supabase as any)
-              .from("job_applications")
-              .update({
-                status: "applied",
-                applied_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", jobApp.id);
+          } else {
+            log(
+              `There was an issue with job_app id ${jobApp.id} with status ${result}`
+            );
           }
         } catch (err) {
           log(`Error applying to job_app id ${jobApp.id}:`, err);
-          await (supabase as any)
-            .from("job_applications")
-            .update({
-              status: "error_applying",
-              reason: (err as Error).message,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", jobApp.id);
         }
 
         // 3. Random delay between applications

@@ -1,17 +1,17 @@
-import { UserProfile, FAQ } from "../src/shared/types.js";
-import { TablesInsert } from "../src/shared/supabase.js";
+import { UserProfile, FAQ } from "../src/shared/types.ts";
+import { TablesInsert } from "../src/shared/supabase.ts";
 import debug from "debug";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import { supabase } from "../src/lib/supabaseClient.js";
+import { supabase } from "../src/lib/supabaseClient.ts";
 import {
   extractTextFromPdfViaMultimodal,
   getEmbedding as getEmbeddingFromAI,
   extractCompanyNamesFromText,
-} from "../agent/ai.js";
-
-const log = debug("jobot:embeddings");
+} from "../agent/ai.ts";
+import { cosineSimilarity } from "./filter.ts";
+const log = debug("jobbot:embeddings");
 
 interface DbProfile {
   user_id: string;
@@ -388,39 +388,53 @@ export async function syncEmbeddings(user: UserProfile): Promise<void> {
           );
           const embedding = await getEmbeddingFromAI(chunk);
           const id = generateDeterministicId(chunk);
-          faqChunksToUpsert.push({
-            id,
-            user_id: user.id,
-            faq_id: faqItem.id,
-            chunk_text: chunk,
-            embedding,
-          });
+          // Check if chunk is already in the database using cosine similarity
+          const { data: existingChunks, error: fetchError } = await supabase
+            .from("faq_chunks")
+            .select("id, embedding")
+            .eq("user_id", faqItem.user_id);
+          if (fetchError) {
+            console.error(
+              "Error fetching existing chunks:",
+              fetchError.message
+            );
+            continue;
+          }
+          let isDuplicate = false;
+          for (const existingChunk of existingChunks) {
+            const embeddingArray = JSON.parse(existingChunk.embedding);
+            const similarity = cosineSimilarity(embedding, embeddingArray);
+            if (similarity > 0.9) {
+              // Threshold for considering chunks as duplicates
+              isDuplicate = true;
+              break;
+            }
+          }
+          if (!isDuplicate) {
+            faqChunksToUpsert.push({
+              id,
+              user_id: faqItem.user_id,
+              faq_id: faqItem.id,
+              chunk_text: chunk,
+              embedding,
+            });
+          }
         } catch (e: any) {
-          log(
-            `[EmbeddingsV4] Failed to generate embedding for an FAQ chunk (via AI service). User: ${
-              user.id
-            }, FAQ ID: ${faqItem.id}. Error: ${
-              e.message
-            }. Chunk start: "${chunk.substring(0, 50)}..."`
+          console.error(
+            `Failed to generate embedding for FAQ chunk: ${e.message}`
           );
         }
       }
     }
     if (faqChunksToUpsert.length > 0) {
-      log(
-        `Upserting ${faqChunksToUpsert.length} FAQ chunks for user ${user.id}...`
-      );
       const { error: upsertError } = await supabase
         .from("faq_chunks")
         .upsert(faqChunksToUpsert as any, { onConflict: "id" });
       if (upsertError) {
-        log(
-          `Error upserting FAQ chunks for user ${user.id}: ${upsertError.message}`
-        );
+        console.error(`Error upserting FAQ chunks: ${upsertError.message}`);
       } else {
-        totalChunksUpserted += faqChunksToUpsert.length;
-        log(
-          `Successfully upserted ${faqChunksToUpsert.length} FAQ chunks for user ${user.id}.`
+        console.log(
+          `Successfully upserted ${faqChunksToUpsert.length} FAQ chunks.`
         );
       }
     }
@@ -435,7 +449,58 @@ export async function syncEmbeddings(user: UserProfile): Promise<void> {
 
 export async function embedFaqEntry(faq: FAQ): Promise<void> {
   console.log("Embedding FAQ entry:", faq.question);
-  // Add logic to generate and save embedding
+  const faqFullText = `${faq.question}\n${faq.answer}`;
+  const textChunks = chunkText(faqFullText, CHUNK_SIZE, CHUNK_OVERLAP);
+  const faqChunksToUpsert: FaqChunkInsert[] = [];
+  for (const chunk of textChunks) {
+    if (chunk.trim().length === 0) continue;
+    try {
+      const embedding = await getEmbeddingFromAI(chunk);
+      const id = generateDeterministicId(chunk);
+      // Check if chunk is already in the database using cosine similarity
+      const { data: existingChunks, error: fetchError } = await supabase
+        .from("faq_chunks")
+        .select("id, embedding")
+        .eq("user_id", faq.user_id);
+      if (fetchError) {
+        console.error("Error fetching existing chunks:", fetchError.message);
+        continue;
+      }
+      let isDuplicate = false;
+      for (const existingChunk of existingChunks) {
+        const embeddingArray = JSON.parse(existingChunk.embedding);
+        const similarity = cosineSimilarity(embedding, embeddingArray);
+        if (similarity > 0.9) {
+          // Threshold for considering chunks as duplicates
+          isDuplicate = true;
+          break;
+        }
+      }
+      if (!isDuplicate) {
+        faqChunksToUpsert.push({
+          id,
+          user_id: faq.user_id,
+          faq_id: faq.id,
+          chunk_text: chunk,
+          embedding,
+        });
+      }
+    } catch (e: any) {
+      console.error(`Failed to generate embedding for FAQ chunk: ${e.message}`);
+    }
+  }
+  if (faqChunksToUpsert.length > 0) {
+    const { error: upsertError } = await supabase
+      .from("faq_chunks")
+      .upsert(faqChunksToUpsert as any, { onConflict: "id" });
+    if (upsertError) {
+      console.error(`Error upserting FAQ chunks: ${upsertError.message}`);
+    } else {
+      console.log(
+        `Successfully upserted ${faqChunksToUpsert.length} FAQ chunks.`
+      );
+    }
+  }
 }
 
 async function runCli() {
@@ -471,6 +536,7 @@ async function runCli() {
   log(`CLI mode: User ID specified: ${userId}`);
   const user: UserProfile = {
     id: userId,
+    user_id: userId,
     name: "Test User CLI",
     email: "testcli@example.com",
   };
